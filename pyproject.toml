@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "socratic-training"
+version = "0.1.0"
+description = "Sequential Red/Socratic/Judge post-training stack for curriculum-bounded Python tutoring."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "OpenAI Codex" }]
+dependencies = [
+  "accelerate>=1.2.0",
+  "bitsandbytes>=0.45.0",
+  "datasets>=3.2.0",
+  "numpy>=2.1.0",
+  "peft>=0.18.0",
+  "safetensors>=0.5.0",
+  "torch>=2.4.0",
+  "transformers>=4.52.0",
+  "trl>=0.18.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+socratic-training = "socratic_training.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,131 @@
+# Edit this file to define the only topics Red may use.
+
+TOPIC: variables and expressions
+DESCRIPTION: simple assignments, arithmetic, and expression tracing
+DIFFICULTIES:
+- beginner
+- easy
+FORBIDDEN:
+- bitwise operators
+- complex numbers
+- floating point precision tricks
+SUBTOPIC: assignment and arithmetic
+OBJECTIVES:
+- evaluate arithmetic expressions in Python
+- store computed values in variables
+KEYWORDS:
+- variable
+- assignment
+- arithmetic
+- print
+SUBTOPIC: tracing updates
+OBJECTIVES:
+- follow how a variable changes step by step
+- predict the final stored value
+KEYWORDS:
+- variable
+- update
+- trace
+---
+TOPIC: conditionals
+DESCRIPTION: beginner branching with boolean comparisons
+DIFFICULTIES:
+- beginner
+- easy
+FORBIDDEN:
+- pattern matching
+- walrus operator
+SUBTOPIC: if else branches
+OBJECTIVES:
+- compare values with if and else
+- choose the correct branch
+KEYWORDS:
+- if
+- else
+- comparison
+SUBTOPIC: nested conditionals
+OBJECTIVES:
+- reason through nested if statements
+- simplify boolean checks
+KEYWORDS:
+- nested
+- if
+- condition
+---
+TOPIC: loops
+DESCRIPTION: beginner loop tracing and simple accumulation
+DIFFICULTIES:
+- beginner
+- easy
+FORBIDDEN:
+- generators
+- async iteration
+- itertools recipes
+SUBTOPIC: for loops over ranges
+OBJECTIVES:
+- iterate with range
+- accumulate a running total
+KEYWORDS:
+- for
+- range
+- total
+SUBTOPIC: while loop conditions
+OBJECTIVES:
+- update loop variables correctly
+- stop loops with the intended condition
+KEYWORDS:
+- while
+- condition
+- counter
+---
+TOPIC: functions
+DESCRIPTION: defining and calling small functions
+DIFFICULTIES:
+- beginner
+- easy
+FORBIDDEN:
+- decorators
+- recursion
+- type hints
+SUBTOPIC: parameters and return values
+OBJECTIVES:
+- define a function with parameters
+- return a computed result
+KEYWORDS:
+- def
+- return
+- parameter
+SUBTOPIC: tracing function calls
+OBJECTIVES:
+- trace the values passed into a function
+- predict the returned output
+KEYWORDS:
+- function call
+- argument
+- return
+---
+TOPIC: lists
+DESCRIPTION: indexing, updates, and simple iteration
+DIFFICULTIES:
+- beginner
+- easy
+FORBIDDEN:
+- list comprehensions
+- slicing with steps
+- nested lists
+SUBTOPIC: indexing and updates
+OBJECTIVES:
+- read items by index
+- update a list element safely
+KEYWORDS:
+- list
+- index
+- update
+SUBTOPIC: iterating over lists
+OBJECTIVES:
+- loop through list items
+- compute a count or total from a list
+KEYWORDS:
+- list
+- loop
+- total
