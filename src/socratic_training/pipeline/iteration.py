@@ -46,7 +46,9 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
     red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty)
     total_generated = len(red.tasks)
     # Strict bucket enforcement: Red must not drift to other topics/difficulties.
-    bucket_tasks = [t for t in red.tasks if t.topic == topic and t.difficulty == difficulty]
+    topic_norm = topic.strip().lower()
+    diff_norm = difficulty.strip().lower()
+    bucket_tasks = [t for t in red.tasks if t.topic.strip().lower() == topic_norm and t.difficulty.strip().lower() == diff_norm]
     if len(bucket_tasks) != len(red.tasks):
         append_event(
             Path(cfg.logging.jsonl_path),

@@ -91,9 +91,43 @@ def generate_red_tasks(
 
             try:
                 obj = extract_first_json(text)
-                if not isinstance(obj, list):
-                    raise ValueError("expected a JSON array")
-                arr = obj
+                arr_candidate: Optional[list] = None
+                if isinstance(obj, list):
+                    arr_candidate = obj
+                elif isinstance(obj, dict):
+                    # Common wrappers: {"tasks":[...]} or {"items":[...]}
+                    for key in ("tasks", "items", "data", "examples"):
+                        v = obj.get(key)
+                        if isinstance(v, list):
+                            arr_candidate = v
+                            break
+                    # String-wrapped JSON (e.g. {"output": "[{...}]"}).
+                    if arr_candidate is None:
+                        for key in ("output", "result", "response", "tasks_json", "json"):
+                            v = obj.get(key)
+                            if not isinstance(v, str):
+                                continue
+                            try:
+                                nested = extract_first_json(v)
+                            except Exception:
+                                continue
+                            if isinstance(nested, list):
+                                arr_candidate = nested
+                                break
+                            if isinstance(nested, dict):
+                                for k2 in ("tasks", "items", "data", "examples"):
+                                    vv = nested.get(k2)
+                                    if isinstance(vv, list):
+                                        arr_candidate = vv
+                                        break
+                                if arr_candidate is not None:
+                                    break
+                    # Single-task object fallback.
+                    if arr_candidate is None and any(k in obj for k in ("statement", "canonical_solution", "buggy_solution", "tests")):
+                        arr_candidate = [obj]
+                if arr_candidate is None:
+                    raise ValueError("expected a JSON array (or object containing a tasks/items list)")
+                arr = arr_candidate
                 break
             except Exception as e:
                 errors.append(f"attempt{attempt}: json_parse_error: {e}")

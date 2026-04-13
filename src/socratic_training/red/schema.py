@@ -48,7 +48,7 @@ class RedTask(BaseModel):
 
     @validator("topic", "difficulty", pre=True)
     def _strip_fields(cls, v: str) -> str:
-        return str(v).strip()
+        return str(v).strip().lower()
 
     @validator("expected_learning_objectives", pre=True)
     def _strip_objectives(cls, v):
@@ -57,6 +57,18 @@ class RedTask(BaseModel):
         if not isinstance(v, list):
             return v
         return [str(x).strip() for x in v if str(x).strip()]
+
+    @validator("canonical_solution", "buggy_solution", pre=True)
+    def _strip_code_fences(cls, v: str) -> str:
+        s = str(v).strip()
+        if s.startswith("```"):
+            lines = s.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            s = "\n".join(lines).strip()
+        return s
 
     @validator("statement")
     def _statement_not_empty(cls, v: str) -> str:
