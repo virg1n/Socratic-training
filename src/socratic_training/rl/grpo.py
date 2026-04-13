@@ -91,19 +91,6 @@ def train_socratic_grpo(
 
     advantages = _compute_advantages(trajectories)
 
-    # Pack into tensors lazily inside collate.
-    def collate(batch_idx: List[int]):
-        # micro-batch is indices
-        ids = batch_idx
-        return ids
-
-    dl = DataLoader(
-        list(range(len(trajectories))),
-        batch_size=grpo.micro_batch_size,
-        shuffle=True,
-        collate_fn=collate,
-    )
-
     # Only use Accelerate when running in a multi-process setup.
     # For the common "single process + device_map sharding" setup, vanilla torch is simpler and avoids wrappers.
     use_accel = Accelerator is not None and int(os.environ.get("WORLD_SIZE", "1")) > 1
@@ -154,12 +141,28 @@ def train_socratic_grpo(
                     model.enable_input_require_grads()
                 except Exception:
                     pass
+            else:
+                # Fallback for older/other architectures: force embedding outputs to require grad.
+                try:
+                    emb = model.get_input_embeddings() if hasattr(model, "get_input_embeddings") else None
+                    if emb is not None and hasattr(emb, "register_forward_hook"):
+                        emb.register_forward_hook(lambda _m, _i, o: o.requires_grad_(True) if hasattr(o, "requires_grad_") else o)
+                except Exception:
+                    pass
 
         # Optimizer: only trainable params (LoRA if enabled).
         opt = torch.optim.AdamW(
             trainable,
             lr=grpo.lr,
             weight_decay=grpo.weight_decay,
+        )
+
+        # DataLoader of trajectory indices.
+        dl = DataLoader(
+            list(range(len(trajectories))),
+            batch_size=grpo.micro_batch_size,
+            shuffle=True,
+            collate_fn=lambda batch_idx: batch_idx,  # indices only
         )
 
         if accelerator is not None:

@@ -76,6 +76,17 @@ def _resolve_torch_dtype(dtype: str):
     raise ValueError(f"Unknown torch_dtype: {dtype}")
 
 
+def _from_pretrained_with_dtype(model_cls, *args, dtype, **kwargs):
+    """
+    Compatibility shim: newer Transformers prefers `dtype=...` and may deprecate `torch_dtype=...`.
+    Older versions may only accept `torch_dtype`.
+    """
+    try:
+        return model_cls.from_pretrained(*args, dtype=dtype, **kwargs)
+    except TypeError:
+        return model_cls.from_pretrained(*args, torch_dtype=dtype, **kwargs)
+
+
 def _build_bnb_config(quantization: Quantization):
     from transformers import BitsAndBytesConfig
 
@@ -136,9 +147,10 @@ def load_socratic(cfg: SocraticModelConfig, *, for_training: bool) -> Generator[
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    base = AutoModelForCausalLM.from_pretrained(
+    base = _from_pretrained_with_dtype(
+        AutoModelForCausalLM,
         cfg.path,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device_map="auto" if torch.cuda.is_available() else None,
         max_memory=max_memory,
         trust_remote_code=True,
@@ -222,12 +234,13 @@ def load_red(cfg: RedModelConfig, *, for_training: bool) -> Generator[LoadedMode
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    base = AutoModelForCausalLM.from_pretrained(
+    base = _from_pretrained_with_dtype(
+        AutoModelForCausalLM,
         cfg.path,
+        dtype=torch.bfloat16,
         device_map="auto" if torch.cuda.is_available() else None,
         max_memory=max_memory,
         quantization_config=qcfg,
-        torch_dtype=torch.bfloat16,
         trust_remote_code=True,
     )
 
@@ -308,9 +321,10 @@ def load_judge(cfg: JudgeModelConfig) -> Generator[LoadedModel, None, None]:
         warnings.warn(f"Judge quantization fallback enabled: {cfg.quantization_fallback}")
         qcfg = _build_bnb_config(cfg.quantization_fallback)
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = _from_pretrained_with_dtype(
+        AutoModelForCausalLM,
         cfg.path,
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         device_map="auto" if torch.cuda.is_available() else None,
         max_memory=max_memory,
         quantization_config=qcfg,
