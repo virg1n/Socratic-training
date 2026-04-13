@@ -14,6 +14,7 @@ from socratic_training.curriculum import Curriculum
 from socratic_training.models.loader import load_red
 from socratic_training.red.prompts import red_task_generation_prompt
 from socratic_training.red.schema import RedTask
+from socratic_training.utils.json import extract_first_json
 
 
 @dataclass
@@ -21,16 +22,6 @@ class RedGenResult:
     tasks: List[RedTask]
     raw_text: str
     errors: Tuple[str, ...] = ()
-
-
-def _extract_json_array(text: str) -> list:
-    start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("Model output does not contain a JSON array.")
-    blob = text[start : end + 1]
-    return json.loads(blob)
-
 
 def generate_red_tasks(
     cfg: AppConfig,
@@ -58,7 +49,17 @@ def generate_red_tasks(
             device = next(model.parameters()).device
         except StopIteration:  # pragma: no cover
             device = getattr(model, "device", "cpu")
-        inputs = tok(prompt, return_tensors="pt").to(device)
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                device = torch.device("cuda:0")
+        except Exception:
+            pass
+
+        inputs = tok(prompt, return_tensors="pt")
+        prompt_len = inputs["input_ids"].shape[1]
+        inputs = inputs.to(device)
         out = model.generate(
             **inputs,
             max_new_tokens=cfg.generation.red_max_new_tokens,
@@ -67,10 +68,14 @@ def generate_red_tasks(
             top_p=0.95,
             pad_token_id=tok.eos_token_id,
         )
-        text = tok.decode(out[0], skip_special_tokens=True)
+        gen = out[0][prompt_len:]
+        text = tok.decode(gen, skip_special_tokens=True)
 
     try:
-        arr = _extract_json_array(text)
+        obj = extract_first_json(text)
+        if not isinstance(obj, list):
+            raise ValueError("expected a JSON array")
+        arr = obj
     except Exception as e:
         return RedGenResult(tasks=[], raw_text=text, errors=(f"json_parse_error: {e}",))
 

@@ -46,6 +46,18 @@ class RedTask(BaseModel):
     # Tests
     tests: List[TestCase]
 
+    @validator("topic", "difficulty", pre=True)
+    def _strip_fields(cls, v: str) -> str:
+        return str(v).strip()
+
+    @validator("expected_learning_objectives", pre=True)
+    def _strip_objectives(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            return v
+        return [str(x).strip() for x in v if str(x).strip()]
+
     @validator("statement")
     def _statement_not_empty(cls, v: str) -> str:
         v = v.strip()

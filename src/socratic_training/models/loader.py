@@ -22,6 +22,14 @@ class LoadedModel:
     device_map: Optional[Dict[str, Any]] = None
 
 
+def _is_accelerate_dispatched(model: Any) -> bool:
+    # When device_map="auto" is used, transformers/accelerate attach hooks and set hf_device_map.
+    try:
+        return bool(getattr(model, "hf_device_map", None))
+    except Exception:
+        return False
+
+
 def _torch_cleanup() -> None:
     try:
         import torch
@@ -38,9 +46,10 @@ def _max_memory_map(safety_margin: float = 0.90, cpu_gib: int = 110) -> Optional
     gpus = get_gpu_info()
     if not gpus:
         return None
-    max_mem: Dict[str, str] = {f"cuda:{g.idx}": f"{int(g.total_gb * safety_margin)}GiB" for g in gpus}
+    # accelerate expects GPU keys as integers (device indices), not "cuda:0" strings.
+    max_mem: Dict[object, str] = {int(g.idx): f"{int(g.total_gb * safety_margin)}GiB" for g in gpus}
     max_mem["cpu"] = f"{cpu_gib}GiB"
-    return max_mem
+    return max_mem  # type: ignore[return-value]
 
 
 def _resolve_torch_dtype(dtype: str):
@@ -159,7 +168,8 @@ def load_socratic(cfg: SocraticModelConfig, *, for_training: bool) -> Generator[
         yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     finally:
         try:
-            model.to("cpu")
+            if not _is_accelerate_dispatched(model):
+                model.to("cpu")
         except Exception:
             pass
         del model
@@ -238,7 +248,8 @@ def load_red(cfg: RedModelConfig, *, for_training: bool) -> Generator[LoadedMode
         yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     finally:
         try:
-            model.to("cpu")
+            if not _is_accelerate_dispatched(model):
+                model.to("cpu")
         except Exception:
             pass
         del model
@@ -287,7 +298,8 @@ def load_judge(cfg: JudgeModelConfig) -> Generator[LoadedModel, None, None]:
         yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     finally:
         try:
-            model.to("cpu")
+            if not _is_accelerate_dispatched(model):
+                model.to("cpu")
         except Exception:
             pass
         del model

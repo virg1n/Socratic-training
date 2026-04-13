@@ -105,9 +105,16 @@ def validate_red_task(
     if task.difficulty not in topic_obj.difficulties:
         reasons.append("difficulty_not_allowed")
 
-    allowed_obj = set(objectives_for_bucket(curriculum, task.topic, task.difficulty))
-    if not set(task.expected_learning_objectives).issubset(allowed_obj):
-        reasons.append("objectives_out_of_bucket")
+    allowed_obj = list(objectives_for_bucket(curriculum, task.topic, task.difficulty))
+    if task.expected_learning_objectives:
+        def _norm(s: str) -> str:
+            return re.sub(r"\s+", " ", s.strip().lower())
+
+        allowed_norm = {_norm(x) for x in allowed_obj}
+        for obj in task.expected_learning_objectives:
+            if _norm(obj) not in allowed_norm:
+                reasons.append("objectives_out_of_bucket")
+                break
 
     forbidden = set(forbidden_for_bucket(curriculum, task.topic, task.difficulty))
     # Quick keyword-based scope check.

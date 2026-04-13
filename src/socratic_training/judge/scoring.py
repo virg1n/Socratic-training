@@ -106,15 +106,24 @@ def score_hints_with_lm(
     model = lm.model
     tok = lm.tokenizer
 
-    device = next(model.parameters()).device
-    inputs = tok(prompt, return_tensors="pt").to(device)
+    try:
+        import torch
+
+        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    except Exception:  # pragma: no cover
+        device = next(model.parameters()).device
+
+    inputs = tok(prompt, return_tensors="pt")
+    prompt_len = inputs["input_ids"].shape[1]
+    inputs = inputs.to(device)
     out = model.generate(
         **inputs,
         max_new_tokens=cfg.generation.judge_max_new_tokens,
         do_sample=False,
         pad_token_id=tok.eos_token_id,
     )
-    text = tok.decode(out[0], skip_special_tokens=True)
+    gen = out[0][prompt_len:]
+    text = tok.decode(gen, skip_special_tokens=True)
 
     try:
         obj = extract_first_json(text)

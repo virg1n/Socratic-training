@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import warnings
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -70,6 +71,24 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
         },
     )
 
+    if not red.tasks:
+        append_event(
+            Path(cfg.logging.jsonl_path),
+            {
+                "type": "iteration_abort",
+                "reason": "red_no_tasks",
+                "topic": topic,
+                "difficulty": difficulty,
+                "red_errors": list(red.errors),
+            },
+        )
+        if total_generated > 0 and not red.errors:
+            raise RuntimeError(
+                "Red produced tasks but none matched the requested (topic,difficulty). "
+                "Ensure Red outputs topic/difficulty exactly as provided by the curriculum bucket."
+            )
+        raise RuntimeError(f"Red produced no parsable tasks. Errors: {list(red.errors)}")
+
     # C: Validate tasks (schema already validated in generator).
     seen: Set[str] = set()
     valid_pairs: List[Tuple[RedTask, TaskValidation]] = []
@@ -94,11 +113,22 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
 
     valid_tasks = [t for (t, _v) in valid_pairs]
     if not valid_tasks:
+        reason_counts = Counter([r for v in validations for r in v.reasons])
+        top = reason_counts.most_common(12)
         append_event(
             Path(cfg.logging.jsonl_path),
             {"type": "iteration_abort", "reason": "no_valid_tasks", "topic": topic, "difficulty": difficulty},
         )
-        raise RuntimeError("No valid Red tasks after validation.")
+        append_event(
+            Path(cfg.logging.jsonl_path),
+            {
+                "type": "task_validation_summary",
+                "topic": topic,
+                "difficulty": difficulty,
+                "reason_counts_top": top,
+            },
+        )
+        raise RuntimeError(f"No valid Red tasks after validation. Top reasons: {top}")
 
     # D: Socratic generates multiple hints per task (group rollouts).
     task_hints: List[Dict[str, object]] = []

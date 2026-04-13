@@ -8,16 +8,14 @@ def extract_first_json(text: str) -> Union[Dict[str, Any], List[Any]]:
     """
     Best-effort extraction of the first JSON object/array embedded in model text.
     """
-    # Try array first, then object.
-    for open_c, close_c in [("[", "]"), ("{", "}")]:
-        start = text.find(open_c)
-        end = text.rfind(close_c)
-        if start == -1 or end == -1 or end <= start:
+    dec = json.JSONDecoder()
+    s = text.strip()
+    for i, ch in enumerate(s):
+        if ch not in "[{":
             continue
-        blob = text[start : end + 1]
         try:
-            return json.loads(blob)
+            obj, _end = dec.raw_decode(s[i:])
+            return obj
         except Exception:
             continue
     raise ValueError("No valid JSON object/array found in text.")
-
