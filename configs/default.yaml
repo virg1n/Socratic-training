@@ -50,7 +50,7 @@ training:
     weight_decay: 0.0
     max_grad_norm: 1.0
     micro_batch_size: 1
-    grad_accum_steps: 8
+    grad_accum_steps: 2
     epochs_per_iter: 1
     beta_answer_dump_penalty: 3.0
     use_gradient_checkpointing: true

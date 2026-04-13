@@ -235,6 +235,16 @@ def train_socratic_grpo(
                     opt.zero_grad(set_to_none=True)
                     steps += 1
 
+        # Final step if we ended with partially-accumulated gradients.
+        if accum > 0 and (accum % grpo.grad_accum_steps) != 0:
+            if accelerator is not None:
+                accelerator.clip_grad_norm_(model.parameters(), grpo.max_grad_norm)
+            else:
+                _clip_trainable_grads(trainable, grpo.max_grad_norm)
+            opt.step()
+            opt.zero_grad(set_to_none=True)
+            steps += 1
+
         save_mode = getattr(cfg.models.socratic, "save_mode", "pretrained")
         if save_mode != "none":
             try:
@@ -256,7 +266,7 @@ def train_socratic_grpo(
 
         mean_r = sum(t.reward for t in trajectories) / len(trajectories)
         mean_a = sum(advantages) / len(advantages)
-        loss = total_loss / max(1, steps * grpo.grad_accum_steps)
+        loss = total_loss / max(1, accum)
         return GrpoTrainStats(steps=steps, mean_reward=float(mean_r), mean_advantage=float(mean_a), loss=float(loss))
 
     if lm is not None:
