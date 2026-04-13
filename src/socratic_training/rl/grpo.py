@@ -246,6 +246,8 @@ def train_socratic_grpo(
             steps += 1
 
         save_mode = getattr(cfg.models.socratic, "save_mode", "pretrained")
+        max_keep = int(getattr(cfg.models.socratic, "max_saved_checkpoints", 1) or 1)
+        max_keep = max(1, min(2, max_keep))  # currently support 1 or 2
         if save_mode != "none":
             try:
                 if accelerator is not None:
@@ -253,14 +255,43 @@ def train_socratic_grpo(
                     if not accelerator.is_main_process:
                         save_mode = "none"
                 if save_mode == "pretrained" and hasattr(model, "save_pretrained"):
-                    if accelerator is not None:
-                        accelerator.unwrap_model(model).save_pretrained(str(output_dir))
+                    import shutil
+
+                    to_save = accelerator.unwrap_model(model) if accelerator is not None else model
+
+                    if max_keep >= 2:
+                        tmp_dir = output_dir.with_name(output_dir.name + "_tmp")
+                        prev_dir = output_dir.with_name(output_dir.name + "_prev")
+                        if tmp_dir.exists():
+                            shutil.rmtree(tmp_dir, ignore_errors=True)
+                        tmp_dir.mkdir(parents=True, exist_ok=True)
+                        to_save.save_pretrained(str(tmp_dir))
+
+                        if prev_dir.exists():
+                            shutil.rmtree(prev_dir, ignore_errors=True)
+                        if output_dir.exists():
+                            shutil.move(str(output_dir), str(prev_dir))
+                        shutil.move(str(tmp_dir), str(output_dir))
                     else:
-                        model.save_pretrained(str(output_dir))
+                        to_save.save_pretrained(str(output_dir))
                 elif save_mode == "state_dict":
                     state_path = output_dir / getattr(cfg.models.socratic, "state_dict_name", "socratic_state_dict.pt")
+                    prev_path = state_path.with_name(f"{state_path.stem}.prev{state_path.suffix}")
+                    tmp_path = state_path.with_name(f"{state_path.stem}.tmp{state_path.suffix}")
+
                     to_save = accelerator.unwrap_model(model) if accelerator is not None else model
-                    torch.save(to_save.state_dict(), str(state_path))
+
+                    if tmp_path.exists():
+                        tmp_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+                    torch.save(to_save.state_dict(), str(tmp_path))
+
+                    if max_keep >= 2 and state_path.exists():
+                        try:
+                            state_path.replace(prev_path)
+                        except Exception:
+                            # Best-effort; don't fail training due to checkpoint rotation.
+                            pass
+                    tmp_path.replace(state_path)
             except Exception:
                 pass
 

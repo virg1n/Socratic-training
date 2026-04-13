@@ -30,6 +30,12 @@ class SocraticModelConfig(BaseModel):
         description="How to save Socratic after GRPO updates: 'pretrained' (HF save_pretrained), "
         "'state_dict' (torch.save state_dict), or 'none'.",
     )
+    max_saved_checkpoints: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum number of Socratic checkpoints to keep on disk. "
+        "For save_mode='state_dict' this keeps the latest plus one '.prev' backup when set to 2.",
+    )
     state_dict_name: str = Field(
         default="socratic_state_dict.pt",
         description="Filename used when save_mode='state_dict' (saved under adapter_dir).",

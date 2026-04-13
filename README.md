@@ -83,5 +83,5 @@ KEYWORDS:
 
 - This repo targets a workstation with **4× RTX 6000 Ada (48GB each)** and **~130GB RAM**.
 - Judge and Red are large; staged loading and CPU offload are required for many configurations. For multi-GPU rigs, you can optionally pin models to GPU subsets via `models.*.allowed_gpus` to reduce conflicts.
-- Socratic fine-tuning mode is controlled by `models.socratic.train_lora` (LoRA vs full fine-tune). Saving behavior is controlled by `models.socratic.save_mode` and `models.red.save_adapters`.
+- Socratic fine-tuning mode is controlled by `models.socratic.train_lora` (LoRA vs full fine-tune). Saving behavior is controlled by `models.socratic.save_mode`, `models.socratic.max_saved_checkpoints`, and `models.red.save_adapters`.
 - Validation executes generated code with strict timeouts; keep the curriculum constrained to safe, beginner Python topics.

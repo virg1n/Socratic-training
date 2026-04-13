@@ -202,9 +202,17 @@ def load_socratic(cfg: SocraticModelConfig, *, for_training: bool) -> Generator[
         for p in model.parameters():
             p.requires_grad_(False)
 
+    loaded = LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     try:
-        yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
+        yield loaded
     finally:
+        # Break reference cycles so dispatched models can be freed promptly.
+        try:
+            loaded.model = None  # type: ignore[assignment]
+            loaded.tokenizer = None  # type: ignore[assignment]
+            loaded.device_map = None
+        except Exception:
+            pass
         try:
             if not _is_accelerate_dispatched(model):
                 model.to("cpu")
@@ -283,9 +291,16 @@ def load_red(cfg: RedModelConfig, *, for_training: bool) -> Generator[LoadedMode
         for p in model.parameters():
             p.requires_grad_(False)
 
+    loaded = LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     try:
-        yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
+        yield loaded
     finally:
+        try:
+            loaded.model = None  # type: ignore[assignment]
+            loaded.tokenizer = None  # type: ignore[assignment]
+            loaded.device_map = None
+        except Exception:
+            pass
         try:
             if not _is_accelerate_dispatched(model):
                 model.to("cpu")
@@ -334,9 +349,16 @@ def load_judge(cfg: JudgeModelConfig) -> Generator[LoadedModel, None, None]:
     for p in model.parameters():
         p.requires_grad_(False)
 
+    loaded = LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
     try:
-        yield LoadedModel(model=model, tokenizer=tokenizer, device_map=getattr(model, "hf_device_map", None))
+        yield loaded
     finally:
+        try:
+            loaded.model = None  # type: ignore[assignment]
+            loaded.tokenizer = None  # type: ignore[assignment]
+            loaded.device_map = None
+        except Exception:
+            pass
         try:
             if not _is_accelerate_dispatched(model):
                 model.to("cpu")

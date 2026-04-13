@@ -9,6 +9,7 @@ models:
     train_lora: false  # full fine-tuning (set true for LoRA)
     adapter_dir: runs/socratic_full
     save_mode: state_dict  # pretrained | state_dict | none
+    max_saved_checkpoints: 2  # keep latest + 1 backup
     # allowed_gpus: [0, 1]  # optionally pin Socratic to specific GPUs
     lora_r: 16
     lora_alpha: 32
