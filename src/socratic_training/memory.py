@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Literal, Optional, Tuple
 
 from socratic_training.config import AppConfig
@@ -43,15 +45,79 @@ def _dtype_bytes(dtype: str) -> int:
 
 
 def _infer_params_b(model_path: str, role_default_b: float) -> float:
-    # Heuristic: look for "...-32B" or "32B" in path.
+    """
+    Best-effort parameter-count inference (billions).
+
+    Important: do NOT regex-scan the full filesystem path because directory names may contain
+    tokens like "24b" (e.g. course names) that are unrelated to model size. We prefer:
+      1) local config.json estimate
+      2) regex on *short* tail name (repo name / last path components)
+      3) role default
+    """
     import re
 
-    m = re.search(r"(\d+(?:\.\d+)?)\s*B\b", model_path, flags=re.IGNORECASE)
-    if m:
+    def _try_regex(s: str) -> Optional[float]:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*B\b", s, flags=re.IGNORECASE)
+        if not m:
+            return None
         try:
             return float(m.group(1))
         except ValueError:
-            pass
+            return None
+
+    def _estimate_from_config(cfg: dict) -> Optional[float]:
+        # Generic-ish transformer param estimate from config.json (no weights needed).
+        def _get_int(*keys: str) -> Optional[int]:
+            for k in keys:
+                v = cfg.get(k)
+                if isinstance(v, int):
+                    return v
+            return None
+
+        hidden = _get_int("hidden_size", "n_embd", "d_model")
+        layers = _get_int("num_hidden_layers", "n_layer", "num_layers")
+        intermediate = _get_int("intermediate_size", "n_inner", "ffn_dim", "d_ff")
+        vocab = _get_int("vocab_size")
+        if not (hidden and layers and intermediate and vocab):
+            return None
+
+        tie = cfg.get("tie_word_embeddings", True)
+        if not isinstance(tie, bool):
+            tie = True
+
+        embed = vocab * hidden
+        lm_head = 0 if tie else vocab * hidden
+        per_layer_attn = 4 * hidden * hidden
+        per_layer_mlp = 3 * hidden * intermediate
+        norms = 2 * layers * hidden + hidden
+        total = embed + lm_head + layers * (per_layer_attn + per_layer_mlp) + norms
+        return float(total) / 1e9
+
+    p = Path(model_path)
+    if p.exists() and p.is_dir():
+        cfg_path = p / "config.json"
+        if cfg_path.exists():
+            try:
+                obj = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    est = _estimate_from_config(obj)
+                    if est is not None and est > 0:
+                        return est
+            except Exception:
+                pass
+
+        parts = list(p.parts)
+        tail = "/".join(parts[-2:]) if len(parts) >= 2 else p.name
+        est = _try_regex(tail)
+        if est is not None:
+            return est
+        return role_default_b
+
+    # HF repo id: only look at the repo name portion.
+    name = model_path.split("/")[-1]
+    est = _try_regex(name)
+    if est is not None:
+        return est
     return role_default_b
 
 
@@ -200,9 +266,12 @@ def preflight_and_autoscale(cfg: AppConfig, *, curriculum: Curriculum, dry_run: 
     updates: Dict[str, object] = {}
 
     # Defaults based on roles (can be overridden later with explicit params).
-    socratic_params_b = _infer_params_b(cfg.models.socratic.path, role_default_b=4.0)
-    red_params_b = _infer_params_b(cfg.models.red.path, role_default_b=32.0)
-    judge_params_b = _infer_params_b(cfg.models.judge.path, role_default_b=32.0)
+    socratic_params_b = float(cfg.models.socratic.params_b or _infer_params_b(cfg.models.socratic.path, role_default_b=4.0))
+    red_params_b = float(cfg.models.red.params_b or _infer_params_b(cfg.models.red.path, role_default_b=32.0))
+    judge_params_b = float(cfg.models.judge.params_b or _infer_params_b(cfg.models.judge.path, role_default_b=32.0))
+    estimates["socratic_params_b"] = socratic_params_b
+    estimates["red_params_b"] = red_params_b
+    estimates["judge_params_b"] = judge_params_b
 
     # Inference sequences are prompt+gen; prompt length varies, use conservative fixed prompt sizes.
     red_seq = 600 + cfg.generation.red_max_new_tokens

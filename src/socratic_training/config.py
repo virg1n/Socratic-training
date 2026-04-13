@@ -10,6 +10,10 @@ except Exception:  # pragma: no cover
 
 class SocraticModelConfig(BaseModel):
     path: str
+    params_b: Optional[float] = Field(
+        default=None,
+        description="Optional explicit parameter-count estimate (billions). Overrides path/config inference for preflight.",
+    )
     torch_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
     train_lora: bool = True
     adapter_dir: str = "runs/socratic_lora"
@@ -20,6 +24,10 @@ class SocraticModelConfig(BaseModel):
 
 class RedModelConfig(BaseModel):
     path: str
+    params_b: Optional[float] = Field(
+        default=None,
+        description="Optional explicit parameter-count estimate (billions). Overrides path inference for preflight.",
+    )
     quantization: Literal["none", "4bit", "8bit"] = "4bit"
     adapter_dir: str = "runs/red_lora"
     lora_r: int = 32
@@ -29,6 +37,10 @@ class RedModelConfig(BaseModel):
 
 class JudgeModelConfig(BaseModel):
     path: str
+    params_b: Optional[float] = Field(
+        default=None,
+        description="Optional explicit parameter-count estimate (billions). Overrides path inference for preflight.",
+    )
     torch_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
     quantization_fallback: Optional[Literal["none", "4bit", "8bit"]] = Field(
         default=None,

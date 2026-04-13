@@ -12,9 +12,12 @@ def run_preflight(config_path: Path) -> None:
     cfg = AppConfig.parse_obj(read_yaml(config_path))
     curriculum = load_curriculum(Path(cfg.curriculum_path))
     report = preflight_and_autoscale(cfg, curriculum=curriculum, dry_run=True)
-    print("Preflight estimates (GB):")
+    print("Preflight estimates:")
     for k, v in sorted(report.estimates_gb.items()):
-        print(f"- {k}: {v:.1f}")
+        if k.endswith("_params_b"):
+            print(f"- {k}: {v:.2f}B params (estimated)")
+        else:
+            print(f"- {k}: {v:.1f}GB")
     if report.suggested_updates:
         print("Auto-reduction suggested updates:")
         for k, v in report.suggested_updates.items():

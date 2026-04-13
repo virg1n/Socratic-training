@@ -45,20 +45,12 @@ def generate_red_tasks(
         model = lm.model
         tok = lm.tokenizer
 
-        try:
-            device = next(model.parameters()).device
-        except StopIteration:  # pragma: no cover
-            device = getattr(model, "device", "cpu")
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                device = torch.device("cuda:0")
-        except Exception:
-            pass
-
         inputs = tok(prompt, return_tensors="pt")
         prompt_len = inputs["input_ids"].shape[1]
+        try:
+            device = model.get_input_embeddings().weight.device
+        except Exception:  # pragma: no cover
+            device = next(model.parameters()).device
         inputs = inputs.to(device)
         out = model.generate(
             **inputs,

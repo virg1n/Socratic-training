@@ -106,15 +106,12 @@ def score_hints_with_lm(
     model = lm.model
     tok = lm.tokenizer
 
-    try:
-        import torch
-
-        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-    except Exception:  # pragma: no cover
-        device = next(model.parameters()).device
-
     inputs = tok(prompt, return_tensors="pt")
     prompt_len = inputs["input_ids"].shape[1]
+    try:
+        device = model.get_input_embeddings().weight.device
+    except Exception:  # pragma: no cover
+        device = next(model.parameters()).device
     inputs = inputs.to(device)
     out = model.generate(
         **inputs,
