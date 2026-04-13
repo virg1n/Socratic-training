@@ -33,6 +33,11 @@ socratic-train train-red-sft --config configs/default.yaml
 socratic-train train-red-dpo --config configs/default.yaml
 ```
 
+Debug Red generation/validation (no Socratic/Judge load):
+```bash
+socratic-train debug-red --config configs/default.yaml --topic "loops" --difficulty "easy"
+```
+
 ## Curriculum format (`curriculum.txt`)
 
 The parser expects **topic blocks** separated by `---` and fields like `TOPIC:`, `DIFFICULTIES:`, `FORBIDDEN:`, `SUBTOPIC:`, `OBJECTIVES:`, `KEYWORDS:`.

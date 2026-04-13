@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import codecs
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 try:  # pydantic v2 provides a v1 compat layer
@@ -68,6 +71,31 @@ class RedTask(BaseModel):
             if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
             s = "\n".join(lines).strip()
+        s = s.replace("\r\n", "\n")
+
+        # Some models double-escape code strings inside JSON. That yields Python like:
+        #   def solve(x):\n    return x
+        # which causes: "unexpected character after line continuation character".
+        # Heuristic: if it looks like source but contains backslash-escapes, decode once.
+        looks_like_def = bool(re.search(r"^\s*def\s+", s))
+        has_escapes = any(tok in s for tok in ("\\n", "\\t", "\\r", '\\"', "\\'"))
+        if looks_like_def and has_escapes:
+            # If the whole field is itself a quoted JSON string literal, decode it.
+            if (s.startswith('"') and s.endswith('"')) and len(s) >= 2:
+                try:
+                    inner = json.loads(s)
+                    if isinstance(inner, str) and re.search(r"^\s*def\s+", inner):
+                        s = inner
+                except Exception:
+                    pass
+
+            try:
+                cand = codecs.decode(s, "unicode_escape")
+                if re.search(r"^\s*def\s+", cand) and cand.count("\\") < s.count("\\"):
+                    s = cand
+            except Exception:
+                pass
+
         return s
 
     @validator("statement")

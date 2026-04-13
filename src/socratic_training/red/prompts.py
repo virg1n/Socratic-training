@@ -26,7 +26,7 @@ def red_task_generation_prompt(*, curriculum_bucket: str, num_tasks: int, max_te
           "canonical_solution": <string, Python code defining solve(...) only; no imports>,
           "buggy_solution": <string, Python code defining solve(...) only; no imports; contains a logical bug>,
           "bug_explanation": <optional string, brief>,
-          "tests": <array of test cases length {min_tests}..{max_tests}>
+          "tests": <array of test cases length EXACTLY {min_tests}>
         }}
 
         Test case format:
@@ -40,6 +40,7 @@ def red_task_generation_prompt(*, curriculum_bucket: str, num_tasks: int, max_te
         - Keep solve(...) pure and deterministic.
         - Avoid giving away the final code in the statement.
         - Ensure problems are non-trivial (at least 2 steps of reasoning).
+        - IMPORTANT: Do not double-escape the Python code strings. After JSON parsing, the code must be valid Python
+          source with real newlines (not literal backslash-n sequences).
         """
     ).strip()
-

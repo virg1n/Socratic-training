@@ -110,11 +110,27 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
     seen: Set[str] = set()
     valid_pairs: List[Tuple[RedTask, TaskValidation]] = []
     validations = []
+    failures_path = Path(cfg.logging.out_dir) / "debug" / "validation_failures.jsonl"
     for t in red.tasks:
         v = validate_red_task(cfg, curriculum=curriculum, task=t, seen_fingerprints=seen)
         validations.append(v)
         if v.ok:
             valid_pairs.append((t, v))
+        else:
+            append_event(
+                failures_path,
+                {
+                    "type": "task_reject",
+                    "topic": topic,
+                    "difficulty": difficulty,
+                    "reasons": list(v.reasons),
+                    "statement_fp": v.fingerprint,
+                    "statement": t.statement[:600],
+                    "canonical_solution_snip": t.canonical_solution[:800],
+                    "buggy_solution_snip": t.buggy_solution[:800],
+                    "num_tests": len(t.tests),
+                },
+            )
 
     append_event(
         Path(cfg.logging.jsonl_path),

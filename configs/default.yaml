@@ -12,7 +12,7 @@ models:
     lora_alpha: 32
     lora_dropout: 0.05
   red:
-    path: Qwen/Qwen3-32B-Instruct
+    path: Qwen/Qwen2.5-32B-Instruct
     # params_b: 32.0  # optional override
     quantization: 4bit
     adapter_dir: runs/red_lora
@@ -20,7 +20,7 @@ models:
     lora_alpha: 64
     lora_dropout: 0.05
   judge:
-    path: Qwen/Qwen3-32B-Instruct
+    path: Qwen/Qwen2.5-32B-Instruct
     # params_b: 32.0  # optional override
     torch_dtype: bfloat16
 
