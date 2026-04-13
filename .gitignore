@@ -1,15 +1,19 @@
-__pycache__/
-.pytest_cache/
-*.pyc
-*.pyo
-*.pyd
-.Python
 .venv/
-venv/
-build/
-dist/
-*.egg-info/
-logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Outputs / artifacts
 artifacts/
-checkpoints/
-offload/
+runs/
+logs/
+data/
+*.log
+*.jsonl
+
+# HF / torch caches (optional)
+.cache/
+

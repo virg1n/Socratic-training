@@ -1,6 +1,4 @@
-"""Curriculum-bounded post-training stack for Socratic Python tutoring."""
+__all__ = ["__version__"]
 
-from .config import PipelineConfig
-from .pipeline import TrainingPipeline
+__version__ = "0.1.0"
 
-__all__ = ["PipelineConfig", "TrainingPipeline"]

@@ -1,0 +1,62 @@
+# Paths
+curriculum_path: curriculum.txt
+
+models:
+  socratic:
+    path: custom/path/to/model
+    torch_dtype: bfloat16
+    train_lora: true
+    adapter_dir: runs/socratic_lora
+    lora_r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+  red:
+    path: Qwen/Qwen3-32B
+    quantization: 4bit
+    adapter_dir: runs/red_lora
+    lora_r: 32
+    lora_alpha: 64
+    lora_dropout: 0.05
+  judge:
+    path: Qwen/Qwen3-32B
+    torch_dtype: bfloat16
+
+generation:
+  red_num_tasks: 10
+  red_max_new_tokens: 900
+  socratic_num_hints: 6  # 4–8 recommended
+  socratic_max_new_tokens: 220
+  judge_max_new_tokens: 700
+
+validation:
+  python_timeout_s: 2.5
+  max_tests: 12
+  min_tests: 6
+  require_buggy_passes_some: true
+
+training:
+  grpo:
+    group_size: 6
+    ppo_clip: 0.2
+    lr: 2.0e-5
+    weight_decay: 0.0
+    max_grad_norm: 1.0
+    micro_batch_size: 1
+    grad_accum_steps: 8
+    epochs_per_iter: 1
+    beta_answer_dump_penalty: 3.0
+    use_gradient_checkpointing: true
+    mixed_precision: bf16
+
+logging:
+  out_dir: runs
+  jsonl_path: runs/events.jsonl
+  hard_buffer_path: runs/hard_buffer.jsonl
+  red_dpo_pairs_path: runs/red_dpo_pairs.jsonl
+
+memory:
+  safety_margin: 0.90
+  auto_reduce: true
+  min_max_new_tokens: 96
+  min_num_hints: 4
+  min_red_num_tasks: 6

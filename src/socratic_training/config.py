@@ -1,161 +1,102 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Any
+from typing import Literal, Optional
 
-import tomllib
-
-
-@dataclass(slots=True)
-class HardwareConfig:
-    gpu_count: int = 4
-    gpu_vram_gb: float = 48.0
-    system_ram_gb: float = 130.0
-    gpu_utilization_target: float = 0.90
-    cpu_offload_budget_gb: float = 96.0
+try:  # pydantic v2 provides a v1 compat layer
+    from pydantic.v1 import BaseModel, Field
+except Exception:  # pragma: no cover
+    from pydantic import BaseModel, Field  # type: ignore[no-redef]
 
 
-@dataclass(slots=True)
-class SocraticConfig:
-    model_path: str = "custom/path/to/model"
-    params_billions: float = 4.0
-    hidden_size: int = 2560
-    num_hidden_layers: int = 32
-    dtype: str = "bfloat16"
-    train_mode: str = "full"
-    train_device: str = "cuda:0"
-    learning_rate: float = 1e-6
-    weight_decay: float = 0.01
-    micro_batch_size: int = 1
-    gradient_accumulation_steps: int = 8
-    max_prompt_tokens: int = 512
-    max_hint_tokens: int = 160
-    group_size: int = 4
-    rollout_temperature: float = 0.8
-    top_p: float = 0.95
-    clip_range: float = 0.2
-    kl_beta: float = 0.02
-    epochs_per_iteration: int = 1
-    max_grad_norm: float = 1.0
-    use_gradient_checkpointing: bool = True
-    paged_optimizer: bool = True
-    hard_example_threshold: float = 0.45
+class SocraticModelConfig(BaseModel):
+    path: str
+    torch_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
+    train_lora: bool = True
+    adapter_dir: str = "runs/socratic_lora"
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
 
 
-@dataclass(slots=True)
-class LoraConfigData:
-    r: int = 16
-    alpha: int = 32
-    dropout: float = 0.05
-    target_modules: list[str] = field(default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+class RedModelConfig(BaseModel):
+    path: str
+    quantization: Literal["none", "4bit", "8bit"] = "4bit"
+    adapter_dir: str = "runs/red_lora"
+    lora_r: int = 32
+    lora_alpha: int = 64
+    lora_dropout: float = 0.05
 
 
-@dataclass(slots=True)
-class RedConfig:
-    model_name: str = "Qwen/Qwen3-32B"
-    params_billions: float = 32.0
-    hidden_size: int = 5120
-    num_hidden_layers: int = 64
-    quantization: str = "4bit"
-    dtype: str = "bfloat16"
-    train_device: str = "cuda:0"
-    max_prompt_tokens: int = 640
-    max_new_tokens: int = 900
-    candidate_count: int = 10
-    generation_batch_size: int = 2
-    train_batch_size: int = 1
-    gradient_accumulation_steps: int = 16
-    learning_rate: float = 2e-4
-    dpo_learning_rate: float = 1e-4
-    lora: LoraConfigData = field(default_factory=LoraConfigData)
-    sft_after_iterations: int = 4
-    dpo_after_iterations: int = 8
-
-
-@dataclass(slots=True)
-class JudgeConfig:
-    model_name: str = "Qwen/Qwen3-32B"
-    params_billions: float = 32.0
-    hidden_size: int = 5120
-    num_hidden_layers: int = 64
-    dtype: str = "bfloat16"
-    quantization_fallback: str = "8bit"
-    max_prompt_tokens: int = 768
-    max_new_tokens: int = 256
-    pairwise_ranking: bool = True
-    weights: dict[str, float] = field(
-        default_factory=lambda: {
-            "did_not_give_final_answer": 0.32,
-            "pedagogical_value": 0.20,
-            "bug_localization_help": 0.16,
-            "curriculum_alignment": 0.12,
-            "beginner_friendliness": 0.10,
-            "actionability_of_hint": 0.10,
-        }
+class JudgeModelConfig(BaseModel):
+    path: str
+    torch_dtype: Literal["float16", "bfloat16", "float32"] = "bfloat16"
+    quantization_fallback: Optional[Literal["none", "4bit", "8bit"]] = Field(
+        default=None,
+        description="Optional fallback if full BF16/FP16 judge inference is too heavy.",
     )
-    disclosure_penalty: float = 1.5
 
 
-@dataclass(slots=True)
-class ValidationConfig:
-    timeout_seconds: int = 4
-    memory_limit_mb: int = 512
-    similarity_threshold: float = 0.85
-    min_statement_chars: int = 40
-    max_statement_chars: int = 700
-    max_solution_lines: int = 120
-    allowed_imports: list[str] = field(default_factory=lambda: ["math", "itertools", "functools", "collections", "string", "re"])
+class ModelsConfig(BaseModel):
+    socratic: SocraticModelConfig
+    red: RedModelConfig
+    judge: JudgeModelConfig
 
 
-@dataclass(slots=True)
-class PathsConfig:
-    curriculum_file: str = "curriculum.txt"
-    output_dir: str = "artifacts"
-    hard_buffer_file: str = "artifacts/hard_examples.jsonl"
-    coverage_log_file: str = "artifacts/curriculum_coverage.jsonl"
-    performance_log_file: str = "artifacts/socratic_metrics.jsonl"
-    checkpoints_dir: str = "checkpoints"
-    offload_dir: str = "offload"
+class GenerationConfig(BaseModel):
+    red_num_tasks: int = 10
+    red_max_new_tokens: int = 900
+
+    socratic_num_hints: int = 6
+    socratic_max_new_tokens: int = 220
+
+    judge_max_new_tokens: int = 700
 
 
-@dataclass(slots=True)
-class PipelineConfig:
-    hardware: HardwareConfig = field(default_factory=HardwareConfig)
-    socratic: SocraticConfig = field(default_factory=SocraticConfig)
-    red: RedConfig = field(default_factory=RedConfig)
-    judge: JudgeConfig = field(default_factory=JudgeConfig)
-    validation: ValidationConfig = field(default_factory=ValidationConfig)
-    paths: PathsConfig = field(default_factory=PathsConfig)
-    seed: int = 42
-    log_level: str = "INFO"
-    max_valid_tasks_per_iteration: int = 4
-    validate_topic_match_with_keywords: bool = True
+class ValidationConfig(BaseModel):
+    python_timeout_s: float = 2.5
+    max_tests: int = 12
+    min_tests: int = 6
+    require_buggy_passes_some: bool = True
 
-    @classmethod
-    def from_toml(cls, path: str | Path) -> "PipelineConfig":
-        raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-        return cls.from_dict(raw)
 
-    @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "PipelineConfig":
-        return cls(
-            hardware=HardwareConfig(**payload.get("hardware", {})),
-            socratic=SocraticConfig(**payload.get("socratic", {})),
-            red=RedConfig(
-                **{
-                    **payload.get("red", {}),
-                    "lora": LoraConfigData(**payload.get("red", {}).get("lora", {})),
-                }
-            ),
-            judge=JudgeConfig(**payload.get("judge", {})),
-            validation=ValidationConfig(**payload.get("validation", {})),
-            paths=PathsConfig(**payload.get("paths", {})),
-            seed=payload.get("seed", 42),
-            log_level=payload.get("log_level", "INFO"),
-            max_valid_tasks_per_iteration=payload.get("max_valid_tasks_per_iteration", 4),
-            validate_topic_match_with_keywords=payload.get("validate_topic_match_with_keywords", True),
-        )
+class GRPOConfig(BaseModel):
+    group_size: int = 6
+    ppo_clip: float = 0.2
+    lr: float = 2.0e-5
+    weight_decay: float = 0.0
+    max_grad_norm: float = 1.0
+    micro_batch_size: int = 1
+    grad_accum_steps: int = 8
+    epochs_per_iter: int = 1
+    beta_answer_dump_penalty: float = 3.0
+    use_gradient_checkpointing: bool = True
+    mixed_precision: Literal["no", "fp16", "bf16"] = "bf16"
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+
+class TrainingConfig(BaseModel):
+    grpo: GRPOConfig
+
+
+class LoggingConfig(BaseModel):
+    out_dir: str = "runs"
+    jsonl_path: str = "runs/events.jsonl"
+    hard_buffer_path: str = "runs/hard_buffer.jsonl"
+    red_dpo_pairs_path: str = "runs/red_dpo_pairs.jsonl"
+
+
+class MemoryConfig(BaseModel):
+    safety_margin: float = 0.90
+    auto_reduce: bool = True
+    min_max_new_tokens: int = 96
+    min_num_hints: int = 4
+    min_red_num_tasks: int = 6
+
+
+class AppConfig(BaseModel):
+    curriculum_path: str = "curriculum.txt"
+    models: ModelsConfig
+    generation: GenerationConfig = GenerationConfig()
+    validation: ValidationConfig = ValidationConfig()
+    training: TrainingConfig = TrainingConfig(grpo=GRPOConfig())
+    logging: LoggingConfig = LoggingConfig()
+    memory: MemoryConfig = MemoryConfig()

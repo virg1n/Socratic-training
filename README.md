@@ -1,126 +1,76 @@
-# Socratic Training
+# Socratic Training (single-node)
 
-Sequential post-training stack for a Python tutoring model with three staged roles:
+Production-oriented training pipeline for a **Socratic hinting LLM** using **GRPO**, with a curriculum-constrained **Red** task generator and a frozen **Judge**.
 
-- `Socratic`: your ~4B SFT model, updated with staged GRPO.
-- `Red`: `Qwen/Qwen3-32B` in 4-bit with LoRA, used for curriculum-bounded hard-example generation.
-- `Judge`: frozen `Qwen/Qwen3-32B`, loaded only for rubric scoring.
+Key properties:
+- **Single node** (Linux + CUDA target), **staged model loading** (never keep Socratic + Red + Judge on GPU at the same time).
+- **Curriculum is the only allowed source of topics** for Red.
+- Strong **task validation** (syntax, tests, buggy-vs-correct behavior, curriculum alignment).
+- Judge provides **rubric subscores** and a weighted reward with a **hard penalty for answer dumping**.
 
-The project is designed for a single Linux workstation with `4 x RTX 6000 Ada 48 GB`, ~`130 GB` RAM, and CUDA. It explicitly avoids impossible configurations by:
+## Quick start
 
-- loading only one role at a time,
-- estimating memory before work starts,
-- shrinking lengths / batch sizes when scenarios look unsafe,
-- using CPU offload budgets and explicit unload cleanup.
+1) Install (example)
+```bash
+pip install -e ".[gpu,train]"
+```
 
-## Architecture
+2) Edit `curriculum.txt` (see format below).
 
-1. Red generates `10` candidate tasks for one curriculum bucket.
-2. Red generates one buggy solution per task.
-3. Validator rejects syntax errors, unsafe code, off-topic tasks, trivial tasks, duplicates, and broken test packages.
-4. Socratic samples `4-8` hints per valid task.
-5. Judge scores hints with rubric subscores and ranking.
-6. Socratic updates with a staged GRPO-style objective.
-7. Poor-performing valid tasks go into the hard-example buffer.
-8. Red is periodically refreshed with SFT and DPO on accepted hard examples and rejected counterexamples.
+3) Run one iteration (generates tasks → validates → Socratic hints → Judge → GRPO update)
+```bash
+socratic-train run-iteration --config configs/default.yaml --topic "loops" --difficulty "easy"
+```
 
-## Repository Layout
+4) Preflight (estimates memory + auto-reduces lengths/batches if needed)
+```bash
+socratic-train preflight --config configs/default.yaml
+```
 
-- `src/socratic_training/curriculum.py`: human-editable curriculum parser.
-- `src/socratic_training/memory.py`: scenario estimator and safety tuning.
-- `src/socratic_training/model_manager.py`: staged load/unload manager with cache cleanup.
-- `src/socratic_training/validators.py`: task validation and sandboxed test execution.
-- `src/socratic_training/socratic.py`: hint rollout and GRPO optimizer.
-- `src/socratic_training/red.py`: curriculum-constrained task generation and Red training.
-- `src/socratic_training/judge.py`: rubric scoring and disclosure penalties.
-- `src/socratic_training/pipeline.py`: end-to-end sequential loop.
+Train Red adapters (optional, periodic):
+```bash
+socratic-train train-red-sft --config configs/default.yaml
+socratic-train train-red-dpo --config configs/default.yaml
+```
 
-## Curriculum Format
+## Curriculum format (`curriculum.txt`)
 
-`curriculum.txt` is the only source of allowed topics. The parser expects:
-
-- `TOPIC:` to start a topic block,
-- `SUBTOPIC:` to start a subtopic bucket,
-- `OBJECTIVES:` / `KEYWORDS:` / `FORBIDDEN:` / `DIFFICULTIES:` as either comma-separated values or bullet lists,
-- `---` to separate topic blocks.
+The parser expects **topic blocks** separated by `---` and fields like `TOPIC:`, `DIFFICULTIES:`, `FORBIDDEN:`, `SUBTOPIC:`, `OBJECTIVES:`, `KEYWORDS:`.
 
 Example:
-
 ```text
-TOPIC: functions
-DESCRIPTION: defining and calling small functions
+TOPIC: loops
+DESCRIPTION: beginner loop tracing and simple accumulation
 DIFFICULTIES:
 - beginner
 - easy
 FORBIDDEN:
-- decorators
-- recursion
-SUBTOPIC: parameters and return values
+- generators
+- async iteration
+SUBTOPIC: for loops over ranges
 OBJECTIVES:
-- define a function with parameters
-- return a computed value
+- iterate with range
+- accumulate a running total
 KEYWORDS:
-- def
-- return
-- argument
-SUBTOPIC: tracing function calls
-OBJECTIVES:
-- trace a value through a function call
-- predict the returned result
-KEYWORDS: call, return, parameter
+- for
+- range
 ---
-TOPIC: conditionals
-DESCRIPTION: simple boolean branching
-DIFFICULTIES: beginner, easy
-FORBIDDEN:
-- pattern matching
-- walrus operator
-SUBTOPIC: if else branches
-OBJECTIVES:
-- compare values with if and else
-- follow one branch based on a condition
-KEYWORDS:
-- if
-- else
-- comparison
 ```
 
-## Config
+## Project layout
 
-Default workstation settings live in `configs/workstation.toml`.
-
-Important defaults:
-
-- Socratic training stays conservative: short prompt/hint windows, micro-batch `1`, gradient checkpointing, paged optimizer.
-- Judge loads separately with `device_map="balanced"` and CPU offload budget.
-- Red uses 4-bit QLoRA for both generation and adapter training.
-
-## Install
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-## Usage
-
-Preflight:
-
-```bash
-socratic-training --config configs/workstation.toml preflight
-```
-
-Run one iteration:
-
-```bash
-socratic-training --config configs/workstation.toml run-iteration --topic functions --subtopic "parameters and return values"
-```
+- `src/socratic_training/curriculum.py` – curriculum parser + bucket queries
+- `src/socratic_training/memory.py` – VRAM/RAM estimator + safety auto-scaling
+- `src/socratic_training/models/loader.py` – staged load/unload, offload, quant, LoRA
+- `src/socratic_training/red/` – curriculum-constrained task generation
+- `src/socratic_training/validation/` – schema + sandboxed execution validator
+- `src/socratic_training/socratic/` – hint generation + disclosure guards
+- `src/socratic_training/judge/` – rubric + scoring + ranking
+- `src/socratic_training/rl/grpo.py` – minimal GRPO implementation
+- `src/socratic_training/buffers/` – hard-example buffer for Red SFT/DPO
 
 ## Notes
 
-- `Judge` is frozen and never trained.
-- `Red` is not unconstrained adversarial generation; prompts explicitly bind it to one curriculum bucket.
-- Validator requires canonical solutions to pass all tests and buggy solutions to fail at least one but not all tests.
-- Hard examples are logged in `artifacts/hard_examples.jsonl`.
-- Coverage and Socratic performance are logged per bucket in `artifacts/`.
+- This repo targets a workstation with **4× RTX 6000 Ada (48GB each)** and **~130GB RAM**.
+- Judge and Red are large; staged loading and CPU offload are required for many configurations.
+- Validation executes generated code with strict timeouts; keep the curriculum constrained to safe, beginner Python topics.

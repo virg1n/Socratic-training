@@ -1,37 +1,56 @@
 from __future__ import annotations
 
 import argparse
-import json
+from pathlib import Path
 
-from .config import PipelineConfig
-from .pipeline import TrainingPipeline
+from socratic_training.pipeline.iteration import run_iteration
+from socratic_training.preflight import run_preflight
+from socratic_training.red.train_dpo import run_red_dpo
+from socratic_training.red.train_sft import run_red_sft
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Sequential Socratic / Red / Judge training stack.")
-    parser.add_argument("--config", default="configs/workstation.toml", help="Path to the TOML configuration file.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="socratic-train")
+    sub = p.add_subparsers(dest="cmd", required=True)
 
-    subparsers.add_parser("preflight", help="Run memory estimation and curriculum parsing.")
+    p_pre = sub.add_parser("preflight", help="Estimate memory + sanity-check config.")
+    p_pre.add_argument("--config", type=Path, required=True)
 
-    run_iteration = subparsers.add_parser("run-iteration", help="Run one full Red -> Validate -> Socratic -> Judge -> GRPO iteration.")
-    run_iteration.add_argument("--topic", default=None, help="Topic name from curriculum.txt.")
-    run_iteration.add_argument("--subtopic", default=None, help="Subtopic name from curriculum.txt.")
-    return parser
+    p_run = sub.add_parser("run-iteration", help="Run one Red→Validate→Socratic→Judge→GRPO iteration.")
+    p_run.add_argument("--config", type=Path, required=True)
+    p_run.add_argument("--topic", type=str, required=True)
+    p_run.add_argument("--difficulty", type=str, required=True)
+
+    p_rsft = sub.add_parser("train-red-sft", help="Train Red LoRA adapters via SFT on hard buffer.")
+    p_rsft.add_argument("--config", type=Path, required=True)
+
+    p_rdpo = sub.add_parser("train-red-dpo", help="Train Red LoRA adapters via DPO on preference pairs.")
+    p_rdpo.add_argument("--config", type=Path, required=True)
+
+    return p
 
 
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    config = PipelineConfig.from_toml(args.config)
-    pipeline = TrainingPipeline(config)
+    args = _build_parser().parse_args()
 
-    if args.command == "preflight":
-        print(json.dumps(pipeline.preflight(), indent=2, ensure_ascii=False))
+    if args.cmd == "preflight":
+        run_preflight(args.config)
         return
 
-    if args.command == "run-iteration":
-        print(json.dumps(pipeline.run_iteration(topic=args.topic, subtopic=args.subtopic), indent=2, ensure_ascii=False))
+    if args.cmd == "run-iteration":
+        run_iteration(args.config, topic=args.topic, difficulty=args.difficulty)
         return
 
-    parser.error(f"Unknown command: {args.command}")
+    if args.cmd == "train-red-sft":
+        run_red_sft(args.config)
+        return
+
+    if args.cmd == "train-red-dpo":
+        run_red_dpo(args.config)
+        return
+
+    raise SystemExit(f"Unknown command: {args.cmd}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()
