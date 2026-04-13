@@ -14,7 +14,7 @@ from socratic_training.curriculum import Curriculum
 from socratic_training.models.loader import load_red
 from socratic_training.red.prompts import red_task_generation_prompt
 from socratic_training.red.schema import RedTask
-from socratic_training.utils.chat import build_model_inputs
+from socratic_training.utils.chat import build_model_inputs, move_to_device
 from socratic_training.utils.json import extract_first_json
 
 
@@ -69,7 +69,7 @@ def generate_red_tasks(
                 device = model.get_input_embeddings().weight.device
             except Exception:  # pragma: no cover
                 device = next(model.parameters()).device
-            inputs = inputs.to(device)
+            inputs = move_to_device(inputs, device)
 
             out = model.generate(
                 **inputs,

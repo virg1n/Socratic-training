@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 from socratic_training.config import AppConfig
 from socratic_training.models.loader import load_socratic
 from socratic_training.socratic.prompts import socratic_single_hint_prompt
-from socratic_training.utils.chat import build_model_inputs
+from socratic_training.utils.chat import build_model_inputs, move_to_device
 
 
 @dataclass
@@ -87,7 +87,7 @@ def generate_hints_with_lm(
         device = model.get_input_embeddings().weight.device
     except Exception:  # pragma: no cover
         device = next(model.parameters()).device
-    inputs = inputs.to(device)
+    inputs = move_to_device(inputs, device)
     out = model.generate(
         **inputs,
         max_new_tokens=cfg.generation.socratic_max_new_tokens,

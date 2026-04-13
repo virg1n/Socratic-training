@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 from socratic_training.config import AppConfig
 from socratic_training.judge.rubric import RUBRIC_FIELDS, judge_prompt
 from socratic_training.models.loader import load_judge
-from socratic_training.utils.chat import build_model_inputs
+from socratic_training.utils.chat import build_model_inputs, move_to_device
 from socratic_training.utils.json import extract_first_json
 
 
@@ -113,7 +113,7 @@ def score_hints_with_lm(
         device = model.get_input_embeddings().weight.device
     except Exception:  # pragma: no cover
         device = next(model.parameters()).device
-    inputs = inputs.to(device)
+    inputs = move_to_device(inputs, device)
     out = model.generate(
         **inputs,
         max_new_tokens=cfg.generation.judge_max_new_tokens,

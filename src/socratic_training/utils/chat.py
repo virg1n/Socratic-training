@@ -30,3 +30,20 @@ def build_model_inputs(tokenizer: Any, *, user_text: str, system_text: Optional[
     text = f"{system_text}\n\n{user_text}" if system_text else user_text
     return tokenizer(text, return_tensors="pt")
 
+
+def move_to_device(batch: Any, device: Any) -> Any:
+    """
+    Moves a tokenizer batch to a device.
+
+    Supports:
+    - transformers.BatchEncoding (has .to)
+    - plain dict[str, Tensor]
+    """
+    if hasattr(batch, "to"):
+        return batch.to(device)
+    if isinstance(batch, dict):
+        out = {}
+        for k, v in batch.items():
+            out[k] = v.to(device) if hasattr(v, "to") else v
+        return out
+    return batch
