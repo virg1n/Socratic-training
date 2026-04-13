@@ -3,7 +3,7 @@
 Production-oriented training pipeline for a **Socratic hinting LLM** using **GRPO**, with a curriculum-constrained **Red** task generator and a frozen **Judge**.
 
 Key properties:
-- **Single node** (Linux + CUDA target), **staged model loading** (never keep Socratic + Red + Judge on GPU at the same time).
+- **Single node** (Linux + CUDA target), default **staged model loading** (to fit large Red/Judge), with optional in-process model reuse via `run-loop`.
 - **Curriculum is the only allowed source of topics** for Red.
 - Strong **task validation** (syntax, tests, buggy-vs-correct behavior, curriculum alignment).
 - Judge provides **rubric subscores** and a weighted reward with a **hard penalty for answer dumping**.
@@ -20,6 +20,11 @@ pip install -e ".[gpu,train]"
 3) Run one iteration (generates tasks → validates → Socratic hints → Judge → GRPO update)
 ```bash
 socratic-train run-iteration --config configs/default.yaml --topic "loops" --difficulty "easy"
+```
+
+Run many iterations in one process (optionally keep models loaded if configured):
+```bash
+socratic-train run-loop --config configs/default.yaml --topic "loops" --difficulty "easy" --iterations 20
 ```
 
 4) Preflight (estimates memory + auto-reduces lengths/batches if needed)
@@ -77,5 +82,6 @@ KEYWORDS:
 ## Notes
 
 - This repo targets a workstation with **4× RTX 6000 Ada (48GB each)** and **~130GB RAM**.
-- Judge and Red are large; staged loading and CPU offload are required for many configurations.
+- Judge and Red are large; staged loading and CPU offload are required for many configurations. For multi-GPU rigs, you can optionally pin models to GPU subsets via `models.*.allowed_gpus` to reduce conflicts.
+- Socratic fine-tuning mode is controlled by `models.socratic.train_lora` (LoRA vs full fine-tune). Saving behavior is controlled by `models.socratic.save_mode` and `models.red.save_adapters`.
 - Validation executes generated code with strict timeouts; keep the curriculum constrained to safe, beginner Python topics.

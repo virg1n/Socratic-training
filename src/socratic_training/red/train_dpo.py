@@ -173,17 +173,19 @@ def train_red_dpo_from_pairs(
             if step >= max_steps:
                 break
 
-        out_dir = Path(cfg.models.red.adapter_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        if hasattr(model, "save_pretrained"):
-            try:
-                if accelerator is not None:
-                    accelerator.wait_for_everyone()
-                    accelerator.unwrap_model(model).save_pretrained(str(out_dir))
-                else:
-                    model.save_pretrained(str(out_dir))
-            except Exception:
-                pass
+        if getattr(cfg.models.red, "save_adapters", True):
+            out_dir = Path(cfg.models.red.adapter_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if hasattr(model, "save_pretrained"):
+                try:
+                    if accelerator is not None:
+                        accelerator.wait_for_everyone()
+                        if accelerator.is_main_process:
+                            accelerator.unwrap_model(model).save_pretrained(str(out_dir))
+                    else:
+                        model.save_pretrained(str(out_dir))
+                except Exception:
+                    pass
 
     return DpoStats(steps=step, loss=total_loss / max(1, step))
 

@@ -63,6 +63,7 @@ def train_socratic_grpo(
     *,
     trajectories: List[GrpoTrajectory],
     output_adapter_dir: Optional[Path] = None,
+    lm: Optional[object] = None,
 ) -> GrpoTrainStats:
     """
     Minimal GRPO/PPO-style update:
@@ -80,6 +81,7 @@ def train_socratic_grpo(
     except Exception:  # pragma: no cover
         Accelerator = None  # type: ignore[assignment]
 
+    import os
     import torch
     from torch.utils.data import DataLoader
 
@@ -102,21 +104,60 @@ def train_socratic_grpo(
         collate_fn=collate,
     )
 
-    if Accelerator is not None:
-        accelerator = Accelerator(mixed_precision=grpo.mixed_precision if grpo.mixed_precision != "no" else None)
-    else:
-        accelerator = None
+    # Only use Accelerate when running in a multi-process setup.
+    # For the common "single process + device_map sharding" setup, vanilla torch is simpler and avoids wrappers.
+    use_accel = Accelerator is not None and int(os.environ.get("WORLD_SIZE", "1")) > 1
+    accelerator = (
+        Accelerator(mixed_precision=grpo.mixed_precision if grpo.mixed_precision != "no" else None) if use_accel else None
+    )
 
-    with load_socratic(cfg.models.socratic, for_training=True) as lm:
-        model = lm.model
-        tok = lm.tokenizer
+    def _clip_trainable_grads(params, max_norm: float) -> None:
+        grads = [p.grad for p in params if getattr(p, "grad", None) is not None]
+        if not grads:
+            return
+        # Compute global norm on CPU to support parameters spread across multiple CUDA devices.
+        norms = [g.detach().float().norm(2).cpu() for g in grads]  # type: ignore[union-attr]
+        total = torch.norm(torch.stack(norms), 2).item()
+        if total <= 0:
+            return
+        clip_coef = float(max_norm) / (float(total) + 1e-6)
+        if clip_coef >= 1.0:
+            return
+        for g in grads:
+            g.detach().mul_(clip_coef)  # type: ignore[union-attr]
+
+    def _train_with_lm(lm_obj) -> GrpoTrainStats:
+        model = lm_obj.model
+        tok = lm_obj.tokenizer
+
+        # Ensure we actually have trainable parameters.
+        trainable = [p for p in model.parameters() if p.requires_grad]
+        if not trainable:
+            raise RuntimeError(
+                "No trainable parameters found in Socratic model. "
+                "If using LoRA, ensure adapters are attached and is_trainable=True. "
+                "If doing full fine-tuning, ensure parameters are not frozen."
+            )
 
         if grpo.use_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
             model.gradient_checkpointing_enable()
+            # Transformers recommends disabling KV cache when checkpointing.
+            try:
+                if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+                    model.config.use_cache = False
+            except Exception:
+                pass
+            # With PEFT/LoRA it's common for embedding outputs to not require grad; this breaks
+            # torch checkpointing (no input requires grad), leading to loss.backward() errors.
+            if hasattr(model, "enable_input_require_grads"):
+                try:
+                    model.enable_input_require_grads()
+                except Exception:
+                    pass
 
         # Optimizer: only trainable params (LoRA if enabled).
         opt = torch.optim.AdamW(
-            [p for p in model.parameters() if p.requires_grad],
+            trainable,
             lr=grpo.lr,
             weight_decay=grpo.weight_decay,
         )
@@ -186,26 +227,37 @@ def train_socratic_grpo(
                     if accelerator is not None:
                         accelerator.clip_grad_norm_(model.parameters(), grpo.max_grad_norm)
                     else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), grpo.max_grad_norm)
+                        _clip_trainable_grads(trainable, grpo.max_grad_norm)
                     opt.step()
                     opt.zero_grad(set_to_none=True)
                     steps += 1
 
-        # Save adapters if using PEFT.
-        if hasattr(model, "save_pretrained"):
+        save_mode = getattr(cfg.models.socratic, "save_mode", "pretrained")
+        if save_mode != "none":
             try:
                 if accelerator is not None:
                     accelerator.wait_for_everyone()
-                    unwrapped = accelerator.unwrap_model(model)
-                    unwrapped.save_pretrained(str(output_dir))
-                else:
-                    model.save_pretrained(str(output_dir))
+                    if not accelerator.is_main_process:
+                        save_mode = "none"
+                if save_mode == "pretrained" and hasattr(model, "save_pretrained"):
+                    if accelerator is not None:
+                        accelerator.unwrap_model(model).save_pretrained(str(output_dir))
+                    else:
+                        model.save_pretrained(str(output_dir))
+                elif save_mode == "state_dict":
+                    state_path = output_dir / getattr(cfg.models.socratic, "state_dict_name", "socratic_state_dict.pt")
+                    to_save = accelerator.unwrap_model(model) if accelerator is not None else model
+                    torch.save(to_save.state_dict(), str(state_path))
             except Exception:
-                # If not a PEFT model, skip.
                 pass
 
-    mean_r = sum(t.reward for t in trajectories) / len(trajectories)
-    mean_a = sum(advantages) / len(advantages)
-    loss = total_loss / max(1, steps * grpo.grad_accum_steps)
-    return GrpoTrainStats(steps=steps, mean_reward=float(mean_r), mean_advantage=float(mean_a), loss=float(loss))
+        mean_r = sum(t.reward for t in trajectories) / len(trajectories)
+        mean_a = sum(advantages) / len(advantages)
+        loss = total_loss / max(1, steps * grpo.grad_accum_steps)
+        return GrpoTrainStats(steps=steps, mean_reward=float(mean_r), mean_advantage=float(mean_a), loss=float(loss))
 
+    if lm is not None:
+        return _train_with_lm(lm)
+
+    with load_socratic(cfg.models.socratic, for_training=True) as loaded:
+        return _train_with_lm(loaded)

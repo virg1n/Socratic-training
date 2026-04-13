@@ -42,12 +42,24 @@ def _torch_cleanup() -> None:
     gc.collect()
 
 
-def _max_memory_map(safety_margin: float = 0.90, cpu_gib: int = 110) -> Optional[Dict[str, str]]:
+def _max_memory_map(
+    safety_margin: float = 0.90,
+    cpu_gib: int = 110,
+    *,
+    allowed_gpus: Optional[Tuple[int, ...]] = None,
+) -> Optional[Dict[str, str]]:
     gpus = get_gpu_info()
     if not gpus:
         return None
     # accelerate expects GPU keys as integers (device indices), not "cuda:0" strings.
-    max_mem: Dict[object, str] = {int(g.idx): f"{int(g.total_gb * safety_margin)}GiB" for g in gpus}
+    allowed = {int(x) for x in allowed_gpus} if allowed_gpus is not None else None
+    max_mem: Dict[object, str] = {}
+    for g in gpus:
+        idx = int(g.idx)
+        if allowed is not None and idx not in allowed:
+            max_mem[idx] = "0GiB"
+        else:
+            max_mem[idx] = f"{int(g.total_gb * safety_margin)}GiB"
     max_mem["cpu"] = f"{cpu_gib}GiB"
     return max_mem  # type: ignore[return-value]
 
@@ -118,7 +130,7 @@ def load_socratic(cfg: SocraticModelConfig, *, for_training: bool) -> Generator[
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch_dtype = _resolve_torch_dtype(cfg.torch_dtype)
-    max_memory = _max_memory_map()
+    max_memory = _max_memory_map(allowed_gpus=tuple(cfg.allowed_gpus) if cfg.allowed_gpus else None)
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.path, use_fast=True, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
@@ -133,6 +145,20 @@ def load_socratic(cfg: SocraticModelConfig, *, for_training: bool) -> Generator[
     )
 
     model = base
+    # Optional "full fine-tune" checkpoint: load state_dict from adapter_dir when configured.
+    # This provides a lightweight checkpoint format (weights only, no optimizer).
+    if (not cfg.train_lora) and getattr(cfg, "save_mode", None) == "state_dict":
+        state_path = Path(cfg.adapter_dir) / getattr(cfg, "state_dict_name", "socratic_state_dict.pt")
+        if state_path.exists():
+            try:
+                sd = torch.load(str(state_path), map_location="cpu")
+                missing, unexpected = model.load_state_dict(sd, strict=False)
+                if missing or unexpected:
+                    warnings.warn(
+                        f"Loaded Socratic state_dict with missing={len(missing)} unexpected={len(unexpected)} keys."
+                    )
+            except Exception as e:
+                warnings.warn(f"Failed to load Socratic state_dict checkpoint {state_path}: {e}")
     if cfg.train_lora:
         try:
             from peft import LoraConfig, PeftModel, TaskType, get_peft_model
@@ -190,7 +216,7 @@ def load_red(cfg: RedModelConfig, *, for_training: bool) -> Generator[LoadedMode
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     qcfg = _build_bnb_config(cfg.quantization)
-    max_memory = _max_memory_map()
+    max_memory = _max_memory_map(allowed_gpus=tuple(cfg.allowed_gpus) if cfg.allowed_gpus else None)
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.path, use_fast=True, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
@@ -271,7 +297,7 @@ def load_judge(cfg: JudgeModelConfig) -> Generator[LoadedModel, None, None]:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch_dtype = _resolve_torch_dtype(cfg.torch_dtype)
-    max_memory = _max_memory_map()
+    max_memory = _max_memory_map(allowed_gpus=tuple(cfg.allowed_gpus) if cfg.allowed_gpus else None)
 
     tokenizer = AutoTokenizer.from_pretrained(cfg.path, use_fast=True, trust_remote_code=True)
     if tokenizer.pad_token_id is None:

@@ -31,6 +31,7 @@ def generate_red_tasks(
     topic: str,
     difficulty: str,
     num_tasks: Optional[int] = None,
+    lm: Optional[object] = None,
 ) -> RedGenResult:
     num = int(num_tasks or cfg.generation.red_num_tasks)
     bucket = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
@@ -51,9 +52,10 @@ def generate_red_tasks(
     text = ""
     arr: Optional[list] = None
 
-    with load_red(cfg.models.red, for_training=False) as lm:
-        model = lm.model
-        tok = lm.tokenizer
+    def _generate_with_lm(lm_obj) -> None:
+        nonlocal arr, text
+        model = lm_obj.model
+        tok = lm_obj.tokenizer
 
         for attempt, gen_kwargs in enumerate(attempt_settings, start=1):
             user_prompt = prompt
@@ -131,6 +133,12 @@ def generate_red_tasks(
                 break
             except Exception as e:
                 errors.append(f"attempt{attempt}: json_parse_error: {e}")
+
+    if lm is not None:
+        _generate_with_lm(lm)
+    else:
+        with load_red(cfg.models.red, for_training=False) as loaded:
+            _generate_with_lm(loaded)
 
     if arr is None:
         return RedGenResult(tasks=[], raw_text=text, errors=tuple(errors or ["json_parse_error: unknown"]))

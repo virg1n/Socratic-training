@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 try:  # pydantic v2 provides a v1 compat layer
     from pydantic.v1 import BaseModel, Field
@@ -20,6 +20,20 @@ class SocraticModelConfig(BaseModel):
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
+    allowed_gpus: Optional[List[int]] = Field(
+        default=None,
+        description="Optional list of CUDA device indices to allow for this model (single-node). "
+        "When set, other GPUs will be excluded from HF device_map sharding.",
+    )
+    save_mode: Literal["pretrained", "state_dict", "none"] = Field(
+        default="pretrained",
+        description="How to save Socratic after GRPO updates: 'pretrained' (HF save_pretrained), "
+        "'state_dict' (torch.save state_dict), or 'none'.",
+    )
+    state_dict_name: str = Field(
+        default="socratic_state_dict.pt",
+        description="Filename used when save_mode='state_dict' (saved under adapter_dir).",
+    )
 
 
 class RedModelConfig(BaseModel):
@@ -33,6 +47,14 @@ class RedModelConfig(BaseModel):
     lora_r: int = 32
     lora_alpha: int = 64
     lora_dropout: float = 0.05
+    allowed_gpus: Optional[List[int]] = Field(
+        default=None,
+        description="Optional list of CUDA device indices to allow for this model (single-node).",
+    )
+    save_adapters: bool = Field(
+        default=True,
+        description="Whether to save Red adapters at the end of SFT/DPO training runs.",
+    )
 
 
 class JudgeModelConfig(BaseModel):
@@ -45,6 +67,10 @@ class JudgeModelConfig(BaseModel):
     quantization_fallback: Optional[Literal["none", "4bit", "8bit"]] = Field(
         default=None,
         description="Optional fallback if full BF16/FP16 judge inference is too heavy.",
+    )
+    allowed_gpus: Optional[List[int]] = Field(
+        default=None,
+        description="Optional list of CUDA device indices to allow for this model (single-node).",
     )
 
 
@@ -104,6 +130,21 @@ class MemoryConfig(BaseModel):
     min_red_num_tasks: int = 6
 
 
+class ExecutionConfig(BaseModel):
+    keep_socratic_loaded: bool = Field(
+        default=False,
+        description="If true, keep Socratic model loaded across multiple iterations (used by run-loop).",
+    )
+    keep_judge_loaded: bool = Field(
+        default=False,
+        description="If true, keep Judge model loaded across multiple iterations (used by run-loop).",
+    )
+    keep_red_loaded: bool = Field(
+        default=False,
+        description="If true, keep Red model loaded across multiple iterations (used by run-loop).",
+    )
+
+
 class AppConfig(BaseModel):
     curriculum_path: str = "curriculum.txt"
     models: ModelsConfig
@@ -112,3 +153,4 @@ class AppConfig(BaseModel):
     training: TrainingConfig = TrainingConfig(grpo=GRPOConfig())
     logging: LoggingConfig = LoggingConfig()
     memory: MemoryConfig = MemoryConfig()
+    execution: ExecutionConfig = ExecutionConfig()

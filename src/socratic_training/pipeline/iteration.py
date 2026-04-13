@@ -29,21 +29,42 @@ def _ensure_dirs(cfg: AppConfig) -> None:
     Path(cfg.models.red.adapter_dir).mkdir(parents=True, exist_ok=True)
 
 
-def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
-    cfg = AppConfig.parse_obj(read_yaml(config_path))
-    curriculum = load_curriculum(Path(cfg.curriculum_path))
-    _ensure_dirs(cfg)
+def _force_eval(lm_obj):
+    model = getattr(lm_obj, "model", None)
+    was_training = bool(getattr(model, "training", False)) if model is not None else False
+    if model is not None and hasattr(model, "eval"):
+        model.eval()
+    return model, was_training
 
-    # Preflight + auto-reduce if requested.
-    report = preflight_and_autoscale(cfg, curriculum=curriculum, dry_run=True)
-    if report.warnings:
-        for w in report.warnings:
-            warnings.warn(w)
 
+def _restore_train(model, was_training: bool) -> None:
+    if model is None:
+        return
+    try:
+        model.train(was_training)
+    except Exception:
+        pass
+
+
+def run_iteration_cfg(
+    cfg: AppConfig,
+    curriculum,
+    *,
+    topic: str,
+    difficulty: str,
+    socratic_lm: Optional[object] = None,
+    judge_lm: Optional[object] = None,
+    red_lm: Optional[object] = None,
+) -> None:
+    """
+    Runs one full Red→Validate→Socratic→Judge→GRPO iteration given an already-loaded cfg/curriculum.
+
+    Optional lm arguments allow reusing loaded models across multiple iterations in one process.
+    """
     append_event(Path(cfg.logging.jsonl_path), {"type": "iteration_start", "topic": topic, "difficulty": difficulty})
 
     # A-B: Red generates candidates (include buggy solutions).
-    red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty)
+    red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm)
     total_generated = len(red.tasks)
     # Strict bucket enforcement: Red must not drift to other topics/difficulties.
     topic_norm = topic.strip().lower()
@@ -166,26 +187,37 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
     # D: Socratic generates multiple hints per task (group rollouts).
     task_hints: List[Dict[str, object]] = []
     num_hints = int(cfg.training.grpo.group_size)
-    with load_socratic(cfg.models.socratic, for_training=False) as soc:
-        for idx, (t, v) in enumerate(valid_pairs):
-            hg = generate_hints_with_lm(
-                cfg,
-                lm=soc,
-                topic=t.topic,
-                difficulty=t.difficulty,
-                statement=t.statement,
-                student_code=t.buggy_solution,
-                buggy_test_details=v.buggy.details if v.buggy else {},
-                num_hints=num_hints,
-            )
-            task_hints.append(
-                {
-                    "task_index": idx,
-                    "task": t,
-                    "hint_gen": hg,
-                    "validation": v,
-                }
-            )
+
+    def _gen_hints_with(lm_obj) -> None:
+        model, was_training = _force_eval(lm_obj)
+        try:
+            for idx, (t, v) in enumerate(valid_pairs):
+                hg = generate_hints_with_lm(
+                    cfg,
+                    lm=lm_obj,
+                    topic=t.topic,
+                    difficulty=t.difficulty,
+                    statement=t.statement,
+                    student_code=t.buggy_solution,
+                    buggy_test_details=v.buggy.details if v.buggy else {},
+                    num_hints=num_hints,
+                )
+                task_hints.append(
+                    {
+                        "task_index": idx,
+                        "task": t,
+                        "hint_gen": hg,
+                        "validation": v,
+                    }
+                )
+        finally:
+            _restore_train(model, was_training)
+
+    if socratic_lm is not None:
+        _gen_hints_with(socratic_lm)
+    else:
+        with load_socratic(cfg.models.socratic, for_training=False) as soc:
+            _gen_hints_with(soc)
 
     append_event(
         Path(cfg.logging.jsonl_path),
@@ -200,21 +232,32 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
 
     # E: Judge evaluates/ranks hints.
     judged: List[Dict[str, object]] = []
-    with load_judge(cfg.models.judge) as judge:
-        for item in task_hints:
-            t: RedTask = item["task"]  # type: ignore[assignment]
-            hg = item["hint_gen"]
-            hints = getattr(hg, "hints", [])
-            jr = score_hints_with_lm(
-                cfg,
-                lm=judge,
-                topic=t.topic,
-                difficulty=t.difficulty,
-                statement=t.statement,
-                student_code=t.buggy_solution,
-                hints=list(hints),
-            )
-            judged.append({**item, "judge_result": jr})
+
+    def _judge_with(lm_obj) -> None:
+        model, was_training = _force_eval(lm_obj)
+        try:
+            for item in task_hints:
+                t: RedTask = item["task"]  # type: ignore[assignment]
+                hg = item["hint_gen"]
+                hints = getattr(hg, "hints", [])
+                jr = score_hints_with_lm(
+                    cfg,
+                    lm=lm_obj,
+                    topic=t.topic,
+                    difficulty=t.difficulty,
+                    statement=t.statement,
+                    student_code=t.buggy_solution,
+                    hints=list(hints),
+                )
+                judged.append({**item, "judge_result": jr})
+        finally:
+            _restore_train(model, was_training)
+
+    if judge_lm is not None:
+        _judge_with(judge_lm)
+    else:
+        with load_judge(cfg.models.judge) as judge:
+            _judge_with(judge)
 
     append_event(
         Path(cfg.logging.jsonl_path),
@@ -284,7 +327,12 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
             )
 
     # F: Update Socratic via GRPO.
-    stats = train_socratic_grpo(cfg, trajectories=trajectories, output_adapter_dir=Path(cfg.models.socratic.adapter_dir))
+    stats = train_socratic_grpo(
+        cfg,
+        trajectories=trajectories,
+        output_adapter_dir=Path(cfg.models.socratic.adapter_dir),
+        lm=socratic_lm,
+    )
     append_event(
         Path(cfg.logging.jsonl_path),
         {
@@ -342,3 +390,18 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
             "hard_examples_added": True,
         },
     )
+
+
+def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
+    cfg = AppConfig.parse_obj(read_yaml(config_path))
+    curriculum = load_curriculum(Path(cfg.curriculum_path))
+    _ensure_dirs(cfg)
+
+    # Preflight + auto-reduce if requested.
+    report = preflight_and_autoscale(cfg, curriculum=curriculum, dry_run=True)
+    if report.warnings:
+        for w in report.warnings:
+            warnings.warn(w)
+
+    run_iteration_cfg(cfg, curriculum, topic=topic, difficulty=difficulty)
+

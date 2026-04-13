@@ -331,25 +331,40 @@ def preflight_and_autoscale(cfg: AppConfig, *, curriculum: Curriculum, dry_run: 
         warnings_out.append(msg)
         ok = False
 
+    def _subset(allowed: Optional[Tuple[int, ...]]) -> Tuple[GpuInfo, ...]:
+        if not gpus:
+            return ()
+        if not allowed:
+            return gpus
+        wanted = {int(x) for x in allowed}
+        sub = tuple(g for g in gpus if int(g.idx) in wanted)
+        return sub or gpus
+
+    red_gpus = _subset(tuple(cfg.models.red.allowed_gpus) if cfg.models.red.allowed_gpus else None)
+    soc_gpus = _subset(tuple(cfg.models.socratic.allowed_gpus) if cfg.models.socratic.allowed_gpus else None)
+    judge_gpus = _subset(tuple(cfg.models.judge.allowed_gpus) if cfg.models.judge.allowed_gpus else None)
+
     # Check each stage separately (staged execution means these are NOT concurrent).
-    for stage_name, total_gb in [
-        ("Red (generation)", red_inf),
-        ("Socratic (hint gen)", soc_inf),
-        ("Judge (scoring)", judge_inf),
+    for stage_name, total_gb, stage_gpus in [
+        ("Red (generation)", red_inf, red_gpus),
+        ("Socratic (hint gen)", soc_inf, soc_gpus),
+        ("Judge (scoring)", judge_inf, judge_gpus),
     ]:
-        if not _fits_per_gpu(total_gb, gpus, margin):
+        if not _fits_per_gpu(total_gb, stage_gpus, margin):
             _warn(
                 f"{stage_name} estimate {total_gb:.1f}GB exceeds available GPU memory "
                 f"(safety_margin={margin:.2f}). Enable more sharding/offload, or reduce lengths."
             )
 
-    if gpus:
-        max_per_gpu = max(g.total_gb for g in gpus) * margin
+    if soc_gpus:
+        max_per_gpu = max(g.total_gb for g in soc_gpus) * margin
         if soc_train > max_per_gpu:
             _warn(
                 f"Socratic training estimate {soc_train:.1f}GB per GPU exceeds ~{max_per_gpu:.1f}GB. "
                 f"Use LoRA ({cfg.models.socratic.train_lora=}), reduce seq_len, or use sharded optimizer."
             )
+    if red_gpus:
+        max_per_gpu = max(g.total_gb for g in red_gpus) * margin
         if red_train > max_per_gpu:
             _warn(
                 f"Red LoRA training estimate {red_train:.1f}GB per GPU exceeds ~{max_per_gpu:.1f}GB. "

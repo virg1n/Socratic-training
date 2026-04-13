@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from socratic_training.pipeline.iteration import run_iteration
+from socratic_training.pipeline.loop import run_loop
 from socratic_training.preflight import run_preflight
 from socratic_training.red.debug import run_red_debug
 from socratic_training.red.train_dpo import run_red_dpo
@@ -21,6 +22,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--config", type=Path, required=True)
     p_run.add_argument("--topic", type=str, required=True)
     p_run.add_argument("--difficulty", type=str, required=True)
+
+    p_loop = sub.add_parser("run-loop", help="Run multiple iterations in one process (optional model reuse).")
+    p_loop.add_argument("--config", type=Path, required=True)
+    p_loop.add_argument("--topic", type=str, required=True)
+    p_loop.add_argument("--difficulty", type=str, required=True)
+    p_loop.add_argument("--iterations", type=int, required=True)
 
     p_rsft = sub.add_parser("train-red-sft", help="Train Red LoRA adapters via SFT on hard buffer.")
     p_rsft.add_argument("--config", type=Path, required=True)
@@ -45,6 +52,10 @@ def main() -> None:
 
     if args.cmd == "run-iteration":
         run_iteration(args.config, topic=args.topic, difficulty=args.difficulty)
+        return
+
+    if args.cmd == "run-loop":
+        run_loop(args.config, topic=args.topic, difficulty=args.difficulty, iterations=int(args.iterations))
         return
 
     if args.cmd == "train-red-sft":
