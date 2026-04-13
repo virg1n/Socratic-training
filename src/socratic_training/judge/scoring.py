@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 from socratic_training.config import AppConfig
 from socratic_training.judge.rubric import RUBRIC_FIELDS, judge_prompt
 from socratic_training.models.loader import load_judge
+from socratic_training.utils.chat import build_model_inputs
 from socratic_training.utils.json import extract_first_json
 
 
@@ -106,7 +107,7 @@ def score_hints_with_lm(
     model = lm.model
     tok = lm.tokenizer
 
-    inputs = tok(prompt, return_tensors="pt")
+    inputs = build_model_inputs(tok, user_text=prompt)
     prompt_len = inputs["input_ids"].shape[1]
     try:
         device = model.get_input_embeddings().weight.device
@@ -119,8 +120,16 @@ def score_hints_with_lm(
         do_sample=False,
         pad_token_id=tok.eos_token_id,
     )
-    gen = out[0][prompt_len:]
-    text = tok.decode(gen, skip_special_tokens=True)
+    import torch
+
+    seq = out[0]
+    prompt_ids = inputs["input_ids"][0]
+    prompt_ids_cmp = prompt_ids.to(seq.device)
+    if seq.numel() >= prompt_len and torch.equal(seq[:prompt_len], prompt_ids_cmp):
+        gen_ids = seq[prompt_len:]
+    else:
+        gen_ids = seq
+    text = tok.decode(gen_ids, skip_special_tokens=True)
 
     try:
         obj = extract_first_json(text)

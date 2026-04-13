@@ -4,6 +4,7 @@ curriculum_path: curriculum.txt
 models:
   socratic:
     path: /home/jovyan/cs5483_24b/Tutorial1/2026/Training/runs/qwen2b-grpo/model
+    # params_b: 2.0  # optional override if preflight inference is wrong
     torch_dtype: bfloat16
     train_lora: true
     adapter_dir: runs/socratic_lora
@@ -12,6 +13,7 @@ models:
     lora_dropout: 0.05
   red:
     path: Qwen/Qwen3-32B
+    # params_b: 32.0  # optional override
     quantization: 4bit
     adapter_dir: runs/red_lora
     lora_r: 32
@@ -19,6 +21,7 @@ models:
     lora_dropout: 0.05
   judge:
     path: Qwen/Qwen3-32B
+    # params_b: 32.0  # optional override
     torch_dtype: bfloat16
 
 generation:

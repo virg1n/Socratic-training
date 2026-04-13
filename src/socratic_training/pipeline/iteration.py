@@ -71,6 +71,21 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
         },
     )
 
+    # Debug: persist Red raw output for inspection when parsing fails.
+    debug_dir = Path(cfg.logging.out_dir) / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    (debug_dir / "red_last_completion.txt").write_text(red.raw_text or "", encoding="utf-8")
+    if red.errors:
+        append_event(
+            Path(cfg.logging.jsonl_path),
+            {
+                "type": "red_output_snippet",
+                "topic": topic,
+                "difficulty": difficulty,
+                "snippet": (red.raw_text or "")[:800],
+            },
+        )
+
     if not red.tasks:
         append_event(
             Path(cfg.logging.jsonl_path),

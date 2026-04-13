@@ -9,7 +9,24 @@ def extract_first_json(text: str) -> Union[Dict[str, Any], List[Any]]:
     Best-effort extraction of the first JSON object/array embedded in model text.
     """
     dec = json.JSONDecoder()
-    s = text.strip()
+    # Normalize common fullwidth punctuation produced by some models.
+    s = (
+        text.strip()
+        .translate(
+            {
+                ord("［"): "[",
+                ord("］"): "]",
+                ord("｛"): "{",
+                ord("｝"): "}",
+                ord("【"): "[",
+                ord("】"): "]",
+                ord("“"): '"',
+                ord("”"): '"',
+                ord("，"): ",",
+                ord("："): ":",
+            }
+        )
+    )
     for i, ch in enumerate(s):
         if ch not in "[{":
             continue

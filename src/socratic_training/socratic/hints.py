@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from socratic_training.config import AppConfig
 from socratic_training.models.loader import load_socratic
 from socratic_training.socratic.prompts import socratic_single_hint_prompt
+from socratic_training.utils.chat import build_model_inputs
 
 
 @dataclass
@@ -80,7 +81,7 @@ def generate_hints_with_lm(
     model = lm.model
     tok = lm.tokenizer
 
-    inputs = tok(prompt, return_tensors="pt")
+    inputs = build_model_inputs(tok, user_text=prompt)
     prompt_ids = inputs["input_ids"][0].tolist()
     try:
         device = model.get_input_embeddings().weight.device
@@ -98,11 +99,19 @@ def generate_hints_with_lm(
     )
 
     prompt_len = inputs["input_ids"].shape[1]
+    prompt_ids_tensor = inputs["input_ids"][0]
     completion_ids: List[List[int]] = []
     hints: List[str] = []
     eos = tok.eos_token_id
     for seq in out:
-        comp = seq[prompt_len:].tolist()
+        import torch
+
+        prompt_ids_cmp = prompt_ids_tensor.to(seq.device)
+        if seq.numel() >= prompt_len and torch.equal(seq[:prompt_len], prompt_ids_cmp):
+            comp_ids = seq[prompt_len:]
+        else:
+            comp_ids = seq
+        comp = comp_ids.tolist()
         if eos in comp:
             comp = comp[: comp.index(eos)]
         # Drop trailing pads/eos leftovers (best-effort).
