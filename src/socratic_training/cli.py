@@ -20,14 +20,42 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run-iteration", help="Run one Red→Validate→Socratic→Judge→GRPO iteration.")
     p_run.add_argument("--config", type=Path, required=True)
-    p_run.add_argument("--topic", type=str, required=True)
-    p_run.add_argument("--difficulty", type=str, required=True)
+    p_run.add_argument(
+        "--topic",
+        type=str,
+        required=True,
+        help='Topic name, "random", or "a/b/c" to sample each iteration.',
+    )
+    p_run.add_argument(
+        "--difficulty",
+        type=str,
+        required=True,
+        help='Difficulty name, "random", or "a/b/c" to sample each iteration.',
+    )
+    p_run.add_argument("--seed", type=int, default=None, help="Optional RNG seed for topic/difficulty sampling.")
+    p_run.add_argument("--debug-red", action="store_true", help="Print/save Red buggy code for inspection.")
+    p_run.add_argument("--debug-socratic", action="store_true", help="Print the first Socratic hint per task.")
+    p_run.add_argument("--debug-judge", action="store_true", help="Print Judge rewards per hint.")
 
     p_loop = sub.add_parser("run-loop", help="Run multiple iterations in one process (optional model reuse).")
     p_loop.add_argument("--config", type=Path, required=True)
-    p_loop.add_argument("--topic", type=str, required=True)
-    p_loop.add_argument("--difficulty", type=str, required=True)
+    p_loop.add_argument(
+        "--topic",
+        type=str,
+        required=True,
+        help='Topic name, "random", or "a/b/c" to sample each iteration.',
+    )
+    p_loop.add_argument(
+        "--difficulty",
+        type=str,
+        required=True,
+        help='Difficulty name, "random", or "a/b/c" to sample each iteration (e.g. "medium/hard").',
+    )
     p_loop.add_argument("--iterations", type=int, required=True)
+    p_loop.add_argument("--seed", type=int, default=None, help="Optional RNG seed for topic/difficulty sampling.")
+    p_loop.add_argument("--debug-red", action="store_true", help="Print/save Red buggy code for inspection.")
+    p_loop.add_argument("--debug-socratic", action="store_true", help="Print the first Socratic hint per task.")
+    p_loop.add_argument("--debug-judge", action="store_true", help="Print Judge rewards per hint.")
 
     p_rsft = sub.add_parser("train-red-sft", help="Train Red LoRA adapters via SFT on hard buffer.")
     p_rsft.add_argument("--config", type=Path, required=True)
@@ -51,11 +79,28 @@ def main() -> None:
         return
 
     if args.cmd == "run-iteration":
-        run_iteration(args.config, topic=args.topic, difficulty=args.difficulty)
+        run_iteration(
+            args.config,
+            topic=args.topic,
+            difficulty=args.difficulty,
+            seed=args.seed,
+            debug_red=bool(args.debug_red),
+            debug_socratic=bool(args.debug_socratic),
+            debug_judge=bool(args.debug_judge),
+        )
         return
 
     if args.cmd == "run-loop":
-        run_loop(args.config, topic=args.topic, difficulty=args.difficulty, iterations=int(args.iterations))
+        run_loop(
+            args.config,
+            topic=args.topic,
+            difficulty=args.difficulty,
+            iterations=int(args.iterations),
+            seed=args.seed,
+            debug_red=bool(args.debug_red),
+            debug_socratic=bool(args.debug_socratic),
+            debug_judge=bool(args.debug_judge),
+        )
         return
 
     if args.cmd == "train-red-sft":

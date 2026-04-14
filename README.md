@@ -27,6 +27,16 @@ Run many iterations in one process (optionally keep models loaded if configured)
 socratic-train run-loop --config configs/default.yaml --topic "loops" --difficulty "easy" --iterations 20
 ```
 
+Randomize buckets per iteration (topic and/or difficulty):
+```bash
+socratic-train run-loop --config configs/default.yaml --topic random --difficulty "medium/hard" --iterations 20
+```
+
+Debug printing during training (prints first Socratic hint per task, and Judge rewards; saves Red buggy code under `runs/debug/`):
+```bash
+socratic-train run-loop --config configs/default.yaml --topic random --difficulty random --iterations 3 --debug-red --debug-socratic --debug-judge
+```
+
 4) Preflight (estimates memory + auto-reduces lengths/batches if needed)
 ```bash
 socratic-train preflight --config configs/default.yaml

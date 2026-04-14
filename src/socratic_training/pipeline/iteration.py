@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import warnings
 from collections import Counter
 from pathlib import Path
@@ -11,6 +12,7 @@ from socratic_training.curriculum import load_curriculum
 from socratic_training.judge.scoring import score_hints_with_lm
 from socratic_training.memory import preflight_and_autoscale
 from socratic_training.models.loader import load_judge, load_socratic
+from socratic_training.pipeline.bucket_select import choose_bucket
 from socratic_training.red.generator import generate_red_tasks
 from socratic_training.red.schema import RedTask
 from socratic_training.rl.grpo import GrpoTrajectory, train_socratic_grpo
@@ -55,6 +57,10 @@ def run_iteration_cfg(
     socratic_lm: Optional[object] = None,
     judge_lm: Optional[object] = None,
     red_lm: Optional[object] = None,
+    iteration_index: Optional[int] = None,
+    debug_red: bool = False,
+    debug_socratic: bool = False,
+    debug_judge: bool = False,
 ) -> None:
     """
     Runs one full Red→Validate→Socratic→Judge→GRPO iteration given an already-loaded cfg/curriculum.
@@ -62,6 +68,9 @@ def run_iteration_cfg(
     Optional lm arguments allow reusing loaded models across multiple iterations in one process.
     """
     append_event(Path(cfg.logging.jsonl_path), {"type": "iteration_start", "topic": topic, "difficulty": difficulty})
+    if debug_red or debug_socratic or debug_judge:
+        idx = "?" if iteration_index is None else str(int(iteration_index))
+        print(f"[debug] iteration={idx} topic={topic} difficulty={difficulty}")
 
     # A-B: Red generates buggy code+assert tests (one task per call).
     red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm)
@@ -197,6 +206,18 @@ def run_iteration_cfg(
         )
         raise RuntimeError(f"No valid Red tasks after validation. Top reasons: {top}")
 
+    if debug_red:
+        idx = "?" if iteration_index is None else str(int(iteration_index))
+        iter_tag = f"iter{idx}_{time.time_ns()}"
+        for i, (t, _v) in enumerate(valid_pairs):
+            out_path = debug_dir / f"red_task_{iter_tag}_{i}.py"
+            out_path.write_text(t.code, encoding="utf-8")
+            print(f"[debug-red] task={i} saved_code={out_path}")
+            if i == 0:
+                print(f"[debug-red] task0_statement: {t.statement}")
+                print("[debug-red] task0_code:")
+                print(t.code)
+
     # D: Socratic generates multiple hints per task (group rollouts).
     task_hints: List[Dict[str, object]] = []
     num_hints = int(cfg.training.grpo.group_size)
@@ -242,6 +263,13 @@ def run_iteration_cfg(
             "num_hints_each": num_hints,
         },
     )
+    if debug_socratic:
+        for item in task_hints:
+            task_index = int(item["task_index"])  # type: ignore[arg-type]
+            hg = item["hint_gen"]
+            hints = list(getattr(hg, "hints", []))
+            first = hints[0] if hints else ""
+            print(f"[debug-socratic] task={task_index} hint0: {first}")
 
     # E: Judge evaluates/ranks hints.
     judged: List[Dict[str, object]] = []
@@ -281,6 +309,25 @@ def run_iteration_cfg(
             "num_tasks": len(judged),
         },
     )
+    if debug_judge:
+        for item in judged:
+            task_index = int(item["task_index"])  # type: ignore[arg-type]
+            jr = item["judge_result"]
+            scores = list(getattr(jr, "scores", []))
+            ranking = list(getattr(jr, "ranking", []))
+            if not scores:
+                print(f"[debug-judge] task={task_index} no_scores errors={list(getattr(jr, 'errors', ()))[:5]}")
+                continue
+            parts = []
+            for s in scores:
+                try:
+                    dump = "*" if bool(getattr(s, "answer_dump", False)) else ""
+                    parts.append(f"{int(s.id)}:{float(s.final_reward):.2f}{dump}")
+                except Exception:
+                    continue
+            best = max((float(getattr(s, "final_reward", -5.0)) for s in scores), default=-5.0)
+            joined = ", ".join(parts)
+            print(f"[debug-judge] task={task_index} rewards=[{joined}] best={best:.2f} ranking={ranking}")
 
     # Build DPO preference pairs for Red: prefer tasks where Socratic struggled.
     bucket_prompt = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
@@ -405,7 +452,16 @@ def run_iteration_cfg(
     )
 
 
-def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
+def run_iteration(
+    config_path: Path,
+    *,
+    topic: str,
+    difficulty: str,
+    seed: Optional[int] = None,
+    debug_red: bool = False,
+    debug_socratic: bool = False,
+    debug_judge: bool = False,
+) -> None:
     cfg = AppConfig.parse_obj(read_yaml(config_path))
     curriculum = load_curriculum(Path(cfg.curriculum_path))
     _ensure_dirs(cfg)
@@ -416,4 +472,17 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
         for w in report.warnings:
             warnings.warn(w)
 
-    run_iteration_cfg(cfg, curriculum, topic=topic, difficulty=difficulty)
+    import random
+
+    rng = random.Random(int(seed)) if seed is not None else random.Random()
+    bucket = choose_bucket(curriculum, topic_spec=topic, difficulty_spec=difficulty, rng=rng)
+    run_iteration_cfg(
+        cfg,
+        curriculum,
+        topic=bucket.topic,
+        difficulty=bucket.difficulty,
+        iteration_index=1,
+        debug_red=bool(debug_red),
+        debug_socratic=bool(debug_socratic),
+        debug_judge=bool(debug_judge),
+    )
