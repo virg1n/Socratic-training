@@ -37,6 +37,11 @@ Debug printing during training (prints first Socratic hint per task, and Judge r
 socratic-train run-loop --config configs/default.yaml --topic random --difficulty random --iterations 3 --debug-red --debug-socratic --debug-judge
 ```
 
+Control how often Red "update data" is written (DPO pairs + hard buffer):
+```bash
+socratic-train run-loop --config configs/default.yaml --topic random --difficulty random --iterations 12 --red-update-every 3
+```
+
 4) Preflight (estimates memory + auto-reduces lengths/batches if needed)
 ```bash
 socratic-train preflight --config configs/default.yaml

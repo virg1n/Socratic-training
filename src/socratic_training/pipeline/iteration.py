@@ -61,6 +61,7 @@ def run_iteration_cfg(
     debug_red: bool = False,
     debug_socratic: bool = False,
     debug_judge: bool = False,
+    red_update_every: int = 1,
 ) -> None:
     """
     Runs one full Red→Validate→Socratic→Judge→GRPO iteration given an already-loaded cfg/curriculum.
@@ -329,32 +330,48 @@ def run_iteration_cfg(
             joined = ", ".join(parts)
             print(f"[debug-judge] task={task_index} rewards=[{joined}] best={best:.2f} ranking={ranking}")
 
-    # Build DPO preference pairs for Red: prefer tasks where Socratic struggled.
-    bucket_prompt = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
-    best_by_task: List[Tuple[float, Dict[str, object]]] = []
-    for item in judged:
-        jr = item["judge_result"]
-        best = max((s.final_reward for s in getattr(jr, "scores", [])), default=-5.0)
-        best_by_task.append((float(best), item))
-    best_by_task.sort(key=lambda x: x[0])  # ascending: hardest first
-    if len(best_by_task) >= 2:
-        easiest = best_by_task[-1][1]
-        rejected_task = easiest["task"]
-        for best, item in best_by_task[: max(1, len(best_by_task) // 2)]:
-            chosen_task = item["task"]
-            append_event(
-                Path(cfg.logging.red_dpo_pairs_path),
-                {
-                    "type": "red_dpo_pair",
-                    "topic": topic,
-                    "difficulty": difficulty,
-                    "prompt": bucket_prompt,
-                    "chosen": chosen_task.dict(),  # type: ignore[union-attr]
-                    "rejected": rejected_task.dict(),  # type: ignore[union-attr]
-                    "chosen_best_reward": best,
-                    "rejected_best_reward": float(best_by_task[-1][0]),
-                },
-            )
+    do_red_update = True
+    if int(red_update_every) > 1 and iteration_index is not None:
+        do_red_update = (int(iteration_index) % int(red_update_every)) == 0
+
+    if do_red_update:
+        # Build DPO preference pairs for Red: prefer tasks where Socratic struggled.
+        bucket_prompt = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
+        best_by_task: List[Tuple[float, Dict[str, object]]] = []
+        for item in judged:
+            jr = item["judge_result"]
+            best = max((s.final_reward for s in getattr(jr, "scores", [])), default=-5.0)
+            best_by_task.append((float(best), item))
+        best_by_task.sort(key=lambda x: x[0])  # ascending: hardest first
+        if len(best_by_task) >= 2:
+            easiest = best_by_task[-1][1]
+            rejected_task = easiest["task"]
+            for best, item in best_by_task[: max(1, len(best_by_task) // 2)]:
+                chosen_task = item["task"]
+                append_event(
+                    Path(cfg.logging.red_dpo_pairs_path),
+                    {
+                        "type": "red_dpo_pair",
+                        "topic": topic,
+                        "difficulty": difficulty,
+                        "prompt": bucket_prompt,
+                        "chosen": chosen_task.dict(),  # type: ignore[union-attr]
+                        "rejected": rejected_task.dict(),  # type: ignore[union-attr]
+                        "chosen_best_reward": best,
+                        "rejected_best_reward": float(best_by_task[-1][0]),
+                    },
+                )
+    else:
+        append_event(
+            Path(cfg.logging.jsonl_path),
+            {
+                "type": "red_update_skipped",
+                "topic": topic,
+                "difficulty": difficulty,
+                "iteration_index": iteration_index,
+                "red_update_every": int(red_update_every),
+            },
+        )
 
     # Build trajectories for GRPO.
     trajectories: List[GrpoTrajectory] = []
@@ -407,37 +424,38 @@ def run_iteration_cfg(
         },
     )
 
-    # G: Add hard examples for Red.
-    hard = HardExampleBuffer(Path(cfg.logging.hard_buffer_path))
-    for item in judged:
-        t: RedTask = item["task"]  # type: ignore[assignment]
-        hg = item["hint_gen"]
-        jr = item["judge_result"]
+    # G: Add hard examples for Red (periodic).
+    if do_red_update:
+        hard = HardExampleBuffer(Path(cfg.logging.hard_buffer_path))
+        for item in judged:
+            t: RedTask = item["task"]  # type: ignore[assignment]
+            hg = item["hint_gen"]
+            jr = item["judge_result"]
 
-        # Heuristic: "performed poorly" if best reward is below the median.
-        best = max((s.final_reward for s in getattr(jr, "scores", [])), default=-5.0)
-        if best < stats.mean_reward:
-            hard.add(
-                topic=t.topic,
-                difficulty=t.difficulty,
-                task=t.dict(),
-                socratic_hints=list(getattr(hg, "hints", [])),
-                judge={
-                    "ranking": getattr(jr, "ranking", []),
-                    "scores": [
-                        {
-                            "id": s.id,
-                            "subscores": s.subscores,
-                            "answer_dump": s.answer_dump,
-                            "final_reward": s.final_reward,
-                            "notes": s.notes,
-                        }
-                        for s in getattr(jr, "scores", [])
-                    ],
-                    "errors": list(getattr(jr, "errors", ())),
-                },
-                best_reward=best,
-            )
+            # Heuristic: "performed poorly" if best reward is below the median.
+            best = max((s.final_reward for s in getattr(jr, "scores", [])), default=-5.0)
+            if best < stats.mean_reward:
+                hard.add(
+                    topic=t.topic,
+                    difficulty=t.difficulty,
+                    task=t.dict(),
+                    socratic_hints=list(getattr(hg, "hints", [])),
+                    judge={
+                        "ranking": getattr(jr, "ranking", []),
+                        "scores": [
+                            {
+                                "id": s.id,
+                                "subscores": s.subscores,
+                                "answer_dump": s.answer_dump,
+                                "final_reward": s.final_reward,
+                                "notes": s.notes,
+                            }
+                            for s in getattr(jr, "scores", [])
+                        ],
+                        "errors": list(getattr(jr, "errors", ())),
+                    },
+                    best_reward=best,
+                )
 
     append_event(
         Path(cfg.logging.jsonl_path),
@@ -447,7 +465,7 @@ def run_iteration_cfg(
             "difficulty": difficulty,
             "num_valid_tasks": len(valid_tasks),
             "num_scored_tasks": len(judged),
-            "hard_examples_added": True,
+            "red_update_ran": bool(do_red_update),
         },
     )
 
@@ -461,6 +479,7 @@ def run_iteration(
     debug_red: bool = False,
     debug_socratic: bool = False,
     debug_judge: bool = False,
+    red_update_every: int = 1,
 ) -> None:
     cfg = AppConfig.parse_obj(read_yaml(config_path))
     curriculum = load_curriculum(Path(cfg.curriculum_path))
@@ -485,4 +504,5 @@ def run_iteration(
         debug_red=bool(debug_red),
         debug_socratic=bool(debug_socratic),
         debug_judge=bool(debug_judge),
+        red_update_every=int(red_update_every),
     )

@@ -36,6 +36,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--debug-red", action="store_true", help="Print/save Red buggy code for inspection.")
     p_run.add_argument("--debug-socratic", action="store_true", help="Print the first Socratic hint per task.")
     p_run.add_argument("--debug-judge", action="store_true", help="Print Judge rewards per hint.")
+    p_run.add_argument(
+        "--red-update-every",
+        type=int,
+        default=1,
+        help="Write Red update artifacts (DPO pairs + hard buffer) every N iterations (default: 1).",
+    )
 
     p_loop = sub.add_parser("run-loop", help="Run multiple iterations in one process (optional model reuse).")
     p_loop.add_argument("--config", type=Path, required=True)
@@ -56,6 +62,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_loop.add_argument("--debug-red", action="store_true", help="Print/save Red buggy code for inspection.")
     p_loop.add_argument("--debug-socratic", action="store_true", help="Print the first Socratic hint per task.")
     p_loop.add_argument("--debug-judge", action="store_true", help="Print Judge rewards per hint.")
+    p_loop.add_argument(
+        "--red-update-every",
+        type=int,
+        default=3,
+        help="Write Red update artifacts (DPO pairs + hard buffer) every N iterations (default: 3).",
+    )
 
     p_rsft = sub.add_parser("train-red-sft", help="Train Red LoRA adapters via SFT on hard buffer.")
     p_rsft.add_argument("--config", type=Path, required=True)
@@ -87,6 +99,7 @@ def main() -> None:
             debug_red=bool(args.debug_red),
             debug_socratic=bool(args.debug_socratic),
             debug_judge=bool(args.debug_judge),
+            red_update_every=int(args.red_update_every),
         )
         return
 
@@ -100,6 +113,7 @@ def main() -> None:
             debug_red=bool(args.debug_red),
             debug_socratic=bool(args.debug_socratic),
             debug_judge=bool(args.debug_judge),
+            red_update_every=int(args.red_update_every),
         )
         return
 

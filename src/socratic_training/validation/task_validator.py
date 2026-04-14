@@ -81,7 +81,7 @@ def _extract_first_file_lineno(stderr: str) -> Optional[int]:
     Best-effort parse of a Python traceback line number:
       File ".../submission.py", line 123, in ...
     """
-    m = re.search(r'File ".*submission\\.py", line (\\d+)', stderr)
+    m = re.search(r'File ".*submission\\.py", line (\d+)', stderr)
     if not m:
         return None
     try:

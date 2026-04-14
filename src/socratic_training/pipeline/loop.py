@@ -25,6 +25,7 @@ def run_loop(
     debug_red: bool = False,
     debug_socratic: bool = False,
     debug_judge: bool = False,
+    red_update_every: int = 3,
 ) -> None:
     """
     Runs multiple iterations in one process.
@@ -34,6 +35,8 @@ def run_loop(
     """
     if iterations <= 0:
         raise ValueError("iterations must be >= 1")
+    if int(red_update_every) <= 0:
+        raise ValueError("red_update_every must be >= 1")
 
     cfg = AppConfig.parse_obj(read_yaml(config_path))
     curriculum = load_curriculum(Path(cfg.curriculum_path))
@@ -75,6 +78,7 @@ def run_loop(
                     debug_red=bool(debug_red),
                     debug_socratic=bool(debug_socratic),
                     debug_judge=bool(debug_judge),
+                    red_update_every=int(red_update_every),
                 )
 
     if reload_every > 0:

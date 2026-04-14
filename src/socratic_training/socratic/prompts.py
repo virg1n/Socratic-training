@@ -18,6 +18,7 @@ def socratic_hint_prompt(
 
         Goal: help the student fix their code by giving hints and questions.
         DO NOT reveal the final correct solution. DO NOT provide full working code.
+        DO NOT output any <think>...</think> blocks or chain-of-thought. Think silently.
         You may show at most 1–2 short code fragments (<= 2 lines each) if absolutely necessary.
 
         The student is working on a curriculum topic: {topic} (difficulty: {difficulty})
@@ -59,6 +60,7 @@ def socratic_single_hint_prompt(
 
         Goal: help the student fix their code by giving ONE helpful hint or question.
         DO NOT reveal the final correct solution. DO NOT provide full working code.
+        DO NOT output any <think>...</think> blocks or chain-of-thought. Think silently.
         You may show at most 1 short code fragment (<= 2 lines) if absolutely necessary.
 
         The student is working on: {topic} (difficulty: {difficulty})

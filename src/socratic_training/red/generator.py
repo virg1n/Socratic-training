@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import random
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -40,13 +42,30 @@ def generate_red_tasks(
     difficulty: str,
     num_tasks: Optional[int] = None,
     lm: Optional[object] = None,
+    rng: Optional[random.Random] = None,
 ) -> RedGenResult:
     num = int(num_tasks or cfg.generation.red_num_tasks)
     bucket = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
-    prompt = red_task_generation_prompt(
-        curriculum_bucket=bucket,
-        min_tests=cfg.validation.min_tests,
-    )
+    rng = rng or random.Random()
+
+    def _nonempty_line_count(code: str) -> int:
+        return sum(1 for line in str(code).splitlines() if line.strip())
+
+    def _sample_target_line_range() -> Tuple[int, int]:
+        r = rng.random()
+        # 15%: short (<10 lines), 70%: medium (20-25), 15%: long (>30).
+        if r < 0.15:
+            return (7, 9)
+        if r < 0.85:
+            return (20, 25)
+        return (31, 40)
+
+    def _prompt_for_target(target_min: int, target_max: int) -> str:
+        return red_task_generation_prompt(
+            curriculum_bucket=bucket,
+            min_tests=cfg.validation.min_tests,
+            code_lines_hint=f"{int(target_min)}-{int(target_max)}",
+        )
 
     attempt_settings = [
         {"do_sample": True, "temperature": 0.7, "top_p": 0.95},
@@ -62,13 +81,17 @@ def generate_red_tasks(
         model = lm_obj.model
         tok = lm_obj.tokenizer
 
+        target_min, target_max = _sample_target_line_range()
+        prompt = _prompt_for_target(target_min, target_max)
+
         text = ""
         for attempt, gen_kwargs in enumerate(attempt_settings, start=1):
             user_prompt = prompt
             if attempt > 1:
                 user_prompt = (
                     prompt
-                    + "\n\nCRITICAL REMINDER: Output MUST be STRICT JSON only, starting with '{' and ending with '}'."
+                    + "\n\nCRITICAL REMINDER: You MAY include a <think>...</think> block, but then output exactly one JSON object and nothing after it. The JSON must start with '{' and end with '}'."
+                    + f"\nTarget code length MUST be within {target_min}-{target_max} non-empty lines."
                 )
 
             inputs = build_model_inputs(tok, user_text=user_prompt)
@@ -132,7 +155,15 @@ def generate_red_tasks(
                 if task_obj is None:
                     raise ValueError("expected a JSON object matching the schema")
 
-                return RedTask.parse_obj(task_obj)
+                task = RedTask.parse_obj(task_obj)
+                lines = _nonempty_line_count(task.code)
+                if lines < target_min or lines > target_max:
+                    errors.append(
+                        f"call{call_index}: attempt{attempt}: code_lines_out_of_range "
+                        f"expected={target_min}-{target_max} got={lines}"
+                    )
+                    continue
+                return task
             except Exception as e:
                 errors.append(f"call{call_index}: attempt{attempt}: json_parse_error: {e}")
 
