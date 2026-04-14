@@ -69,12 +69,23 @@ def run_iteration_cfg(
     Optional lm arguments allow reusing loaded models across multiple iterations in one process.
     """
     append_event(Path(cfg.logging.jsonl_path), {"type": "iteration_start", "topic": topic, "difficulty": difficulty})
-    if debug_red or debug_socratic or debug_judge:
+    debug_any = debug_red or debug_socratic or debug_judge
+    t0 = time.monotonic()
+
+    def _stage(name: str) -> None:
+        if not debug_any:
+            return
+        dt = time.monotonic() - t0
+        idx = "?" if iteration_index is None else str(int(iteration_index))
+        print(f"[debug] iteration={idx} stage={name} t={dt:.1f}s")
+
+    if debug_any:
         idx = "?" if iteration_index is None else str(int(iteration_index))
         print(f"[debug] iteration={idx} topic={topic} difficulty={difficulty}")
 
     # A-B: Red generates buggy code+assert tests (one task per call).
-    red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm)
+    _stage("red_generate")
+    red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm, debug=debug_red)
     total_generated = len(red.tasks)
     # Strict bucket enforcement: Red must not drift to other topics/difficulties.
     topic_norm = topic.strip().lower()
@@ -140,6 +151,7 @@ def run_iteration_cfg(
         raise RuntimeError(f"Red produced no parsable tasks. Errors: {list(red.errors)}")
 
     # C: Validate tasks (schema already validated in generator).
+    _stage("validate")
     seen: Set[str] = set()
     valid_pairs: List[Tuple[RedTask, TaskValidation]] = []
     validations = []
@@ -220,6 +232,7 @@ def run_iteration_cfg(
                 print(t.code)
 
     # D: Socratic generates multiple hints per task (group rollouts).
+    _stage("socratic_hint_gen")
     task_hints: List[Dict[str, object]] = []
     num_hints = int(cfg.training.grpo.group_size)
 
@@ -273,6 +286,7 @@ def run_iteration_cfg(
             print(f"[debug-socratic] task={task_index} hint0: {first}")
 
     # E: Judge evaluates/ranks hints.
+    _stage("judge_scoring")
     judged: List[Dict[str, object]] = []
 
     def _judge_with(lm_obj) -> None:
@@ -404,6 +418,7 @@ def run_iteration_cfg(
             )
 
     # F: Update Socratic via GRPO.
+    _stage("grpo_update")
     stats = train_socratic_grpo(
         cfg,
         trajectories=trajectories,
