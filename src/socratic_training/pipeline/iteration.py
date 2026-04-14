@@ -63,7 +63,7 @@ def run_iteration_cfg(
     """
     append_event(Path(cfg.logging.jsonl_path), {"type": "iteration_start", "topic": topic, "difficulty": difficulty})
 
-    # A-B: Red generates candidates (include buggy solutions).
+    # A-B: Red generates buggy code+assert tests (one task per call).
     red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm)
     total_generated = len(red.tasks)
     # Strict bucket enforcement: Red must not drift to other topics/difficulties.
@@ -97,15 +97,17 @@ def run_iteration_cfg(
     # Debug: persist Red raw output for inspection when parsing fails.
     debug_dir = Path(cfg.logging.out_dir) / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
-    (debug_dir / "red_last_completion.txt").write_text(red.raw_text or "", encoding="utf-8")
+    raw_debug = "\n\n".join([f"### CALL {i+1}\n{t}" for i, t in enumerate(red.raw_texts[-10:])]) if red.raw_texts else ""
+    (debug_dir / "red_last_completion.txt").write_text(raw_debug, encoding="utf-8")
     if red.errors:
+        last_text = red.raw_texts[-1] if red.raw_texts else ""
         append_event(
             Path(cfg.logging.jsonl_path),
             {
                 "type": "red_output_snippet",
                 "topic": topic,
                 "difficulty": difficulty,
-                "snippet": (red.raw_text or "")[:800],
+                "snippet": (last_text or "")[:800],
             },
         )
 
@@ -132,11 +134,22 @@ def run_iteration_cfg(
     valid_pairs: List[Tuple[RedTask, TaskValidation]] = []
     validations = []
     failures_path = Path(cfg.logging.out_dir) / "debug" / "validation_failures.jsonl"
+    observed_path = Path(cfg.logging.out_dir) / "debug" / "observed_failures.jsonl"
     for t in red.tasks:
         v = validate_red_task(cfg, curriculum=curriculum, task=t, seen_fingerprints=seen)
         validations.append(v)
         if v.ok:
             valid_pairs.append((t, v))
+            append_event(
+                observed_path,
+                {
+                    "type": "observed_failure",
+                    "topic": topic,
+                    "difficulty": difficulty,
+                    "statement_fp": v.fingerprint,
+                    "observed_failure": (v.observed_failure or "")[:2000],
+                },
+            )
         else:
             append_event(
                 failures_path,
@@ -147,9 +160,9 @@ def run_iteration_cfg(
                     "reasons": list(v.reasons),
                     "statement_fp": v.fingerprint,
                     "statement": t.statement[:600],
-                    "canonical_solution_snip": t.canonical_solution[:800],
-                    "buggy_solution_snip": t.buggy_solution[:800],
-                    "num_tests": len(t.tests),
+                    "code_snip": t.code[:1200],
+                    "observed_failure": (v.observed_failure or "")[:800],
+                    "code_len": len(t.code),
                 },
             )
 
@@ -198,8 +211,8 @@ def run_iteration_cfg(
                     topic=t.topic,
                     difficulty=t.difficulty,
                     statement=t.statement,
-                    student_code=t.buggy_solution,
-                    buggy_test_details=v.buggy.details if v.buggy else {},
+                    student_code=t.code,
+                    observed_failure=v.observed_failure or "",
                     num_hints=num_hints,
                 )
                 task_hints.append(
@@ -246,7 +259,7 @@ def run_iteration_cfg(
                     topic=t.topic,
                     difficulty=t.difficulty,
                     statement=t.statement,
-                    student_code=t.buggy_solution,
+                    student_code=t.code,
                     hints=list(hints),
                 )
                 judged.append({**item, "judge_result": jr})
@@ -404,4 +417,3 @@ def run_iteration(config_path: Path, *, topic: str, difficulty: str) -> None:
             warnings.warn(w)
 
     run_iteration_cfg(cfg, curriculum, topic=topic, difficulty=difficulty)
-

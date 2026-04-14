@@ -35,20 +35,30 @@ def run_loop(config_path: Path, *, topic: str, difficulty: str, iterations: int)
     keep_soc = bool(getattr(cfg.execution, "keep_socratic_loaded", False))
     keep_judge = bool(getattr(cfg.execution, "keep_judge_loaded", False))
     keep_red = bool(getattr(cfg.execution, "keep_red_loaded", False))
+    reload_every = int(getattr(cfg.execution, "reload_every_iters", 0) or 0)
 
-    with ExitStack() as stack:
-        soc = stack.enter_context(load_socratic(cfg.models.socratic, for_training=True)) if keep_soc else None
-        judge = stack.enter_context(load_judge(cfg.models.judge)) if keep_judge else None
-        red = stack.enter_context(load_red(cfg.models.red, for_training=False)) if keep_red else None
+    def _run_chunk(n: int) -> None:
+        with ExitStack() as stack:
+            soc = stack.enter_context(load_socratic(cfg.models.socratic, for_training=True)) if keep_soc else None
+            judge = stack.enter_context(load_judge(cfg.models.judge)) if keep_judge else None
+            red = stack.enter_context(load_red(cfg.models.red, for_training=False)) if keep_red else None
 
-        for _ in range(int(iterations)):
-            run_iteration_cfg(
-                cfg,
-                curriculum,
-                topic=topic,
-                difficulty=difficulty,
-                socratic_lm=soc,
-                judge_lm=judge,
-                red_lm=red,
-            )
+            for _ in range(int(n)):
+                run_iteration_cfg(
+                    cfg,
+                    curriculum,
+                    topic=topic,
+                    difficulty=difficulty,
+                    socratic_lm=soc,
+                    judge_lm=judge,
+                    red_lm=red,
+                )
 
+    if reload_every > 0:
+        remaining = int(iterations)
+        while remaining > 0:
+            chunk = min(int(reload_every), remaining)
+            _run_chunk(chunk)
+            remaining -= chunk
+    else:
+        _run_chunk(int(iterations))

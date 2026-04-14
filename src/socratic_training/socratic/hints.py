@@ -18,20 +18,16 @@ class HintGenResult:
     errors: Tuple[str, ...] = ()
 
 
-def _summarize_failures(buggy_details: dict, max_items: int = 3) -> str:
-    failures = buggy_details.get("failures", [])
-    if not isinstance(failures, list) or not failures:
-        return "No detailed failures available."
-    parts = []
-    for f in failures[:max_items]:
-        if not isinstance(f, dict):
-            continue
-        i = f.get("i")
-        kind = f.get("kind")
-        exp = f.get("expected")
-        got = f.get("got")
-        parts.append(f"- test[{i}]: {kind} (expected={exp!r}, got={got!r})")
-    return "\n".join(parts) if parts else "No detailed failures available."
+def _summarize_failure_text(observed_failure: str, *, max_lines: int = 40) -> str:
+    """
+    Keeps the tail of an interpreter traceback / error output.
+    """
+    text = (observed_failure or "").strip()
+    if not text:
+        return "None"
+    lines = text.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    return tail.strip() or "None"
 
 
 def generate_hints(
@@ -41,7 +37,7 @@ def generate_hints(
     difficulty: str,
     statement: str,
     student_code: str,
-    buggy_test_details: dict,
+    observed_failure: str,
     num_hints: Optional[int] = None,
 ) -> HintGenResult:
     with load_socratic(cfg.models.socratic, for_training=False) as lm:
@@ -52,7 +48,7 @@ def generate_hints(
             difficulty=difficulty,
             statement=statement,
             student_code=student_code,
-            buggy_test_details=buggy_test_details,
+            observed_failure=observed_failure,
             num_hints=num_hints,
         )
 
@@ -65,14 +61,14 @@ def generate_hints_with_lm(
     difficulty: str,
     statement: str,
     student_code: str,
-    buggy_test_details: dict,
+    observed_failure: str,
     num_hints: Optional[int] = None,
 ) -> HintGenResult:
     n = int(num_hints or cfg.generation.socratic_num_hints)
     prompt = socratic_single_hint_prompt(
         statement=statement,
         student_code=student_code,
-        failure_summary=_summarize_failures(buggy_test_details),
+        failure_summary=_summarize_failure_text(observed_failure),
         topic=topic,
         difficulty=difficulty,
     )
@@ -81,29 +77,30 @@ def generate_hints_with_lm(
     model = lm.model
     tok = lm.tokenizer
 
-    inputs = build_model_inputs(tok, user_text=prompt)
-    prompt_ids = inputs["input_ids"][0].tolist()
+    base_inputs = build_model_inputs(tok, user_text=prompt)
+    prompt_ids = base_inputs["input_ids"][0].tolist()
     try:
         device = model.get_input_embeddings().weight.device
     except Exception:  # pragma: no cover
         device = next(model.parameters()).device
-    inputs = move_to_device(inputs, device)
-    out = model.generate(
-        **inputs,
-        max_new_tokens=cfg.generation.socratic_max_new_tokens,
-        do_sample=True,
-        temperature=0.85,
-        top_p=0.95,
-        num_return_sequences=n,
-        pad_token_id=tok.eos_token_id,
-    )
 
-    prompt_len = inputs["input_ids"].shape[1]
-    prompt_ids_tensor = inputs["input_ids"][0]
+    prompt_len = base_inputs["input_ids"].shape[1]
+    prompt_ids_tensor = base_inputs["input_ids"][0]
     completion_ids: List[List[int]] = []
     hints: List[str] = []
     eos = tok.eos_token_id
-    for seq in out:
+    for _ in range(n):
+        inputs = move_to_device(base_inputs, device)
+        out = model.generate(
+            **inputs,
+            max_new_tokens=cfg.generation.socratic_max_new_tokens,
+            do_sample=True,
+            temperature=0.85,
+            top_p=0.95,
+            num_return_sequences=1,
+            pad_token_id=tok.eos_token_id,
+        )
+        seq = out[0]
         import torch
 
         prompt_ids_cmp = prompt_ids_tensor.to(seq.device)

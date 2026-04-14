@@ -20,7 +20,8 @@ def run_red_debug(config_path: Path, *, topic: str, difficulty: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty)
-    (out_dir / "red_last_completion.txt").write_text(red.raw_text or "", encoding="utf-8")
+    raw_debug = "\n\n".join([f"### CALL {i+1}\n{t}" for i, t in enumerate(red.raw_texts[-10:])]) if red.raw_texts else ""
+    (out_dir / "red_last_completion.txt").write_text(raw_debug, encoding="utf-8")
     print(f"Red parse errors: {list(red.errors)}")
     print(f"Red tasks parsed: {len(red.tasks)}")
 
@@ -38,4 +39,3 @@ def run_red_debug(config_path: Path, *, topic: str, difficulty: str) -> None:
         print("Top reject reasons:")
         for r, c in reasons.most_common(15):
             print(f"- {r}: {c}")
-

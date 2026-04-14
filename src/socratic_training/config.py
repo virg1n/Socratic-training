@@ -149,6 +149,11 @@ class ExecutionConfig(BaseModel):
         default=False,
         description="If true, keep Red model loaded across multiple iterations (used by run-loop).",
     )
+    reload_every_iters: int = Field(
+        default=0,
+        ge=0,
+        description="If >0, force model reload every N iterations in run-loop (even when keep_* flags are true).",
+    )
 
 
 class AppConfig(BaseModel):

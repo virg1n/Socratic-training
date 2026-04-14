@@ -23,6 +23,15 @@ class SandboxResult:
     wall_s: float
 
 
+@dataclass
+class ExecResult:
+    ok: bool
+    returncode: int
+    stdout: str
+    stderr: str
+    wall_s: float
+
+
 def run_tests_in_subprocess(
     *,
     code: str,
@@ -187,3 +196,62 @@ def run_tests_in_subprocess(
             wall_s=wall,
         )
 
+
+def run_code_in_subprocess(
+    *,
+    code: str,
+    timeout_s: float,
+    python_executable: Optional[str] = None,
+) -> ExecResult:
+    """
+    Executes a Python module as a subprocess and captures stdout/stderr.
+
+    This is used for Red-generated "code with asserts" tasks where the code itself
+    contains tests and should crash with a Python traceback.
+    """
+    py = python_executable or sys.executable
+    start = monotonic()
+
+    with tempfile.TemporaryDirectory(prefix="socratic_sandbox_") as td:
+        tdp = Path(td)
+        (tdp / "submission.py").write_text(code, encoding="utf-8")
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONHASHSEED": "0",
+                "PYTHONNOUSERSITE": "1",
+                "OMP_NUM_THREADS": "1",
+                "MKL_NUM_THREADS": "1",
+                "OPENBLAS_NUM_THREADS": "1",
+            }
+        )
+
+        cmd = [py, "-I", "-S", str(tdp / "submission.py")]
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(tdp),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as e:
+            wall = monotonic() - start
+            return ExecResult(
+                ok=False,
+                returncode=124,
+                stdout=e.stdout or "",
+                stderr=(e.stderr or "") + "\nTIMEOUT",
+                wall_s=wall,
+            )
+
+        wall = monotonic() - start
+        return ExecResult(
+            ok=proc.returncode == 0,
+            returncode=int(proc.returncode),
+            stdout=(proc.stdout or "").strip(),
+            stderr=(proc.stderr or "").strip(),
+            wall_s=wall,
+        )

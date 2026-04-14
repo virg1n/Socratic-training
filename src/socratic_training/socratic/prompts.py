@@ -22,14 +22,18 @@ def socratic_hint_prompt(
 
         The student is working on a curriculum topic: {topic} (difficulty: {difficulty})
 
-        Problem:
+        ## Task
         {statement}
 
-        Student's current code (buggy):
+        ## Code
+        ```python
         {student_code}
+        ```
 
-        Observed test failures:
+        ## Error
+        ```text
         {failure_summary}
+        ```
 
         Produce {num_hints} distinct hints. Each hint should:
         - point to a specific mistake or reasoning step
@@ -59,15 +63,21 @@ def socratic_single_hint_prompt(
 
         The student is working on: {topic} (difficulty: {difficulty})
 
-        Problem:
+        ## Task
         {statement}
 
-        Student's current code (buggy):
+        ## Code
+        ```python
         {student_code}
+        ```
 
-        Observed test failures:
+        ## Error
+        ```text
         {failure_summary}
+        ```
 
-        Output a single hint (1–3 sentences). No JSON. No lists.
+        ## Instruction
+        Ask 1–2 guiding questions (or one concise hint) that help me discover the mistake without giving the answer.
+        Output plain text only (no JSON, no lists).
         """
     ).strip()

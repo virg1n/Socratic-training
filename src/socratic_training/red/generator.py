@@ -1,8 +1,6 @@
 from __future__ import annotations
-
-import json
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
 try:
     from pydantic.v1 import ValidationError
@@ -21,8 +19,18 @@ from socratic_training.utils.json import extract_first_json
 @dataclass
 class RedGenResult:
     tasks: List[RedTask]
-    raw_text: str
+    raw_texts: List[str]
     errors: Tuple[str, ...] = ()
+
+
+def _coerce_to_task_obj(obj) -> Optional[dict]:
+    if isinstance(obj, dict):
+        return obj
+    if isinstance(obj, list) and obj and isinstance(obj[0], dict):
+        # Some models still return an array despite instructions.
+        return obj[0]
+    return None
+
 
 def generate_red_tasks(
     cfg: AppConfig,
@@ -37,8 +45,6 @@ def generate_red_tasks(
     bucket = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
     prompt = red_task_generation_prompt(
         curriculum_bucket=bucket,
-        num_tasks=num,
-        max_tests=cfg.validation.max_tests,
         min_tests=cfg.validation.min_tests,
     )
 
@@ -49,20 +55,20 @@ def generate_red_tasks(
     ]
 
     errors: List[str] = []
-    text = ""
-    arr: Optional[list] = None
+    texts: List[str] = []
+    tasks: List[RedTask] = []
 
-    def _generate_with_lm(lm_obj) -> None:
-        nonlocal arr, text
+    def _generate_one_with_lm(lm_obj, *, call_index: int) -> Optional[RedTask]:
         model = lm_obj.model
         tok = lm_obj.tokenizer
 
+        text = ""
         for attempt, gen_kwargs in enumerate(attempt_settings, start=1):
             user_prompt = prompt
             if attempt > 1:
                 user_prompt = (
                     prompt
-                    + "\n\nCRITICAL REMINDER: Output MUST be STRICT JSON only, starting with '[' and ending with ']'."
+                    + "\n\nCRITICAL REMINDER: Output MUST be STRICT JSON only, starting with '{' and ending with '}'."
                 )
 
             inputs = build_model_inputs(tok, user_text=user_prompt)
@@ -90,64 +96,73 @@ def generate_red_tasks(
                 # Some generation utilities may return only the generated tokens.
                 gen_ids = seq
             text = tok.decode(gen_ids, skip_special_tokens=True)
+            texts.append(text)
 
             try:
                 obj = extract_first_json(text)
-                arr_candidate: Optional[list] = None
-                if isinstance(obj, list):
-                    arr_candidate = obj
-                elif isinstance(obj, dict):
-                    # Common wrappers: {"tasks":[...]} or {"items":[...]}
-                    for key in ("tasks", "items", "data", "examples"):
-                        v = obj.get(key)
-                        if isinstance(v, list):
-                            arr_candidate = v
-                            break
-                    # String-wrapped JSON (e.g. {"output": "[{...}]"}).
-                    if arr_candidate is None:
-                        for key in ("output", "result", "response", "tasks_json", "json"):
+                task_obj: Optional[dict] = None
+                # Common wrappers: {"task":{...}} or {"data":{...}}
+                if isinstance(obj, dict):
+                    if all(k in obj for k in ("topic", "difficulty", "statement", "code")):
+                        task_obj = obj
+                    else:
+                        for key in ("task", "data", "example", "item"):
                             v = obj.get(key)
-                            if not isinstance(v, str):
-                                continue
-                            try:
-                                nested = extract_first_json(v)
-                            except Exception:
-                                continue
-                            if isinstance(nested, list):
-                                arr_candidate = nested
+                            cand = _coerce_to_task_obj(v)
+                            if cand is not None:
+                                task_obj = cand
                                 break
-                            if isinstance(nested, dict):
-                                for k2 in ("tasks", "items", "data", "examples"):
-                                    vv = nested.get(k2)
-                                    if isinstance(vv, list):
-                                        arr_candidate = vv
-                                        break
-                                if arr_candidate is not None:
+                        if task_obj is None:
+                            # String-wrapped JSON (e.g. {"output": "{...}"}).
+                            for key in ("output", "result", "response", "task_json", "json"):
+                                v = obj.get(key)
+                                if not isinstance(v, str):
+                                    continue
+                                try:
+                                    nested = extract_first_json(v)
+                                except Exception:
+                                    continue
+                                cand = _coerce_to_task_obj(nested)
+                                if cand is not None:
+                                    task_obj = cand
                                     break
-                    # Single-task object fallback.
-                    if arr_candidate is None and any(k in obj for k in ("statement", "canonical_solution", "buggy_solution", "tests")):
-                        arr_candidate = [obj]
-                if arr_candidate is None:
-                    raise ValueError("expected a JSON array (or object containing a tasks/items list)")
-                arr = arr_candidate
-                break
+                else:
+                    task_obj = _coerce_to_task_obj(obj)
+
+                if task_obj is None:
+                    raise ValueError("expected a JSON object matching the schema")
+
+                return RedTask.parse_obj(task_obj)
             except Exception as e:
-                errors.append(f"attempt{attempt}: json_parse_error: {e}")
+                errors.append(f"call{call_index}: attempt{attempt}: json_parse_error: {e}")
+
+        errors.append(f"call{call_index}: json_parse_error: unknown")
+        return None
+
+    def _generate_many(lm_obj) -> None:
+        nonlocal tasks
+        max_calls = max(num * 4, num + 2)
+        call_index = 0
+        while len(tasks) < num and call_index < max_calls:
+            call_index += 1
+            task = _generate_one_with_lm(lm_obj, call_index=call_index)
+            if task is None:
+                continue
+            tasks.append(task)
 
     if lm is not None:
-        _generate_with_lm(lm)
+        _generate_many(lm)
     else:
         with load_red(cfg.models.red, for_training=False) as loaded:
-            _generate_with_lm(loaded)
+            _generate_many(loaded)
 
-    if arr is None:
-        return RedGenResult(tasks=[], raw_text=text, errors=tuple(errors or ["json_parse_error: unknown"]))
-
-    tasks: List[RedTask] = []
-    for i, obj in enumerate(arr):
+    # Best-effort schema validation error reporting already recorded as json_parse_error.
+    # Still catch any stray ValidationError (e.g., if RedTask parse fails unexpectedly).
+    valid_tasks: List[RedTask] = []
+    for i, t in enumerate(tasks):
         try:
-            tasks.append(RedTask.parse_obj(obj))
+            valid_tasks.append(RedTask.parse_obj(t.dict()))
         except ValidationError as e:
             errors.append(f"task[{i}] schema validation failed: {e}")
 
-    return RedGenResult(tasks=tasks, raw_text=text, errors=tuple(errors))
+    return RedGenResult(tasks=valid_tasks[:num], raw_texts=texts, errors=tuple(errors))

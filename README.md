@@ -5,7 +5,7 @@ Production-oriented training pipeline for a **Socratic hinting LLM** using **GRP
 Key properties:
 - **Single node** (Linux + CUDA target), default **staged model loading** (to fit large Red/Judge), with optional in-process model reuse via `run-loop`.
 - **Curriculum is the only allowed source of topics** for Red.
-- Strong **task validation** (syntax, tests, buggy-vs-correct behavior, curriculum alignment).
+- Strong **task validation** (syntax/safety, curriculum alignment, and “code+assert tests” execution that must fail with an interpreter traceback).
 - Judge provides **rubric subscores** and a weighted reward with a **hard penalty for answer dumping**.
 
 ## Quick start
@@ -85,3 +85,9 @@ KEYWORDS:
 - Judge and Red are large; staged loading and CPU offload are required for many configurations. For multi-GPU rigs, you can optionally pin models to GPU subsets via `models.*.allowed_gpus` to reduce conflicts.
 - Socratic fine-tuning mode is controlled by `models.socratic.train_lora` (LoRA vs full fine-tune). Saving behavior is controlled by `models.socratic.save_mode`, `models.socratic.max_saved_checkpoints`, and `models.red.save_adapters`.
 - Validation executes generated code with strict timeouts; keep the curriculum constrained to safe, beginner Python topics.
+
+### Red task format
+
+Red is prompted to generate **one task per call** as a strict JSON object:
+- `topic`, `difficulty`, `statement`
+- `code`: a **buggy** Python module that includes **assert-based tests** and executes them (so running the module produces a traceback).
