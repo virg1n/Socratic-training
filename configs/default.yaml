@@ -31,7 +31,7 @@ models:
     # allowed_gpus: [2, 3]  # optionally pin Judge to specific GPUs
 
 generation:
-  red_num_tasks: 10
+  red_num_tasks: 3
   red_max_new_tokens: 900
   socratic_num_hints: 6  # 4–8 recommended
   socratic_max_new_tokens: 220
@@ -45,7 +45,7 @@ validation:
 
 training:
   grpo:
-    group_size: 6
+    group_size: 8
     ppo_clip: 0.2
     lr: 2.0e-5
     weight_decay: 0.0
@@ -73,5 +73,5 @@ memory:
 # Optional: keep models loaded when using `socratic-train run-loop` (requires enough GPU memory, or pin GPUs via allowed_gpus).
 execution:
   keep_socratic_loaded: false
-  keep_judge_loaded: false
-  keep_red_loaded: false
+  keep_judge_loaded: true
+  keep_red_loaded: true
