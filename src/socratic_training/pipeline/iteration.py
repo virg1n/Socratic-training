@@ -85,7 +85,15 @@ def run_iteration_cfg(
 
     # A-B: Red generates buggy code+assert tests (one task per call).
     _stage("red_generate")
-    red = generate_red_tasks(cfg, curriculum=curriculum, topic=topic, difficulty=difficulty, lm=red_lm, debug=debug_red)
+    red = generate_red_tasks(
+        cfg,
+        curriculum=curriculum,
+        topic=topic,
+        difficulty=difficulty,
+        lm=red_lm,
+        debug=debug_red,
+        save_raw=debug_any,
+    )
     total_generated = len(red.tasks)
     # Strict bucket enforcement: Red must not drift to other topics/difficulties.
     topic_norm = topic.strip().lower()
@@ -121,7 +129,7 @@ def run_iteration_cfg(
     raw_debug = "\n\n".join([f"### CALL {i+1}\n{t}" for i, t in enumerate(red.raw_texts[-10:])]) if red.raw_texts else ""
     (debug_dir / "red_last_completion.txt").write_text(raw_debug, encoding="utf-8")
     iter_tag: Optional[str] = None
-    if debug_red:
+    if debug_any:
         idx = "?" if iteration_index is None else str(int(iteration_index))
         iter_tag = f"iter{idx}_{time.time_ns()}"
     if red.errors:
@@ -309,6 +317,38 @@ def run_iteration_cfg(
             hints = list(getattr(hg, "hints", []))
             first = hints[0] if hints else ""
             print(f"[debug-socratic] task={task_index} hint0: {first}")
+    if debug_any:
+        tag = iter_tag or f"iter{time.time_ns()}"
+        for item in task_hints:
+            task_index = int(item["task_index"])  # type: ignore[arg-type]
+            t: RedTask = item["task"]  # type: ignore[assignment]
+            v: TaskValidation = item["validation"]  # type: ignore[assignment]
+            hg = item["hint_gen"]
+            hints = list(getattr(hg, "hints", []))
+            errors = list(getattr(hg, "errors", ()))
+            raw = str(getattr(hg, "raw_text", "") or "")
+            out_path = debug_dir / f"socratic_hints_{tag}_task{task_index}.txt"
+            body = []
+            body.append(f"TOPIC: {t.topic}")
+            body.append(f"DIFFICULTY: {t.difficulty}")
+            body.append("")
+            body.append("STATEMENT:")
+            body.append(t.statement)
+            body.append("")
+            body.append("OBSERVED_FAILURE:")
+            body.append(str(v.observed_failure or ""))
+            body.append("")
+            body.append("HINTS:")
+            for i, h in enumerate(hints):
+                body.append(f"[{i}] {h}")
+            if errors:
+                body.append("")
+                body.append(f"ERRORS: {errors}")
+            if raw and raw.strip() and raw.strip() != "\n\n".join([f"[{i}] {h}" for i, h in enumerate(hints)]).strip():
+                body.append("")
+                body.append("RAW_TEXT:")
+                body.append(raw)
+            out_path.write_text("\n".join(body).strip() + "\n", encoding="utf-8")
 
     # E: Judge evaluates/ranks hints.
     _stage("judge_scoring")
@@ -368,6 +408,20 @@ def run_iteration_cfg(
             best = max((float(getattr(s, "final_reward", -5.0)) for s in scores), default=-5.0)
             joined = ", ".join(parts)
             print(f"[debug-judge] task={task_index} rewards=[{joined}] best={best:.2f} ranking={ranking}")
+    if debug_any:
+        tag = iter_tag or f"iter{time.time_ns()}"
+        for item in judged:
+            task_index = int(item["task_index"])  # type: ignore[arg-type]
+            t: RedTask = item["task"]  # type: ignore[assignment]
+            jr = item["judge_result"]
+            out_path = debug_dir / f"judge_raw_{tag}_task{task_index}.txt"
+            raw = str(getattr(jr, "raw_text", "") or "")
+            errs = list(getattr(jr, "errors", ()))
+            header = [f"TOPIC: {t.topic}", f"DIFFICULTY: {t.difficulty}", ""]
+            if errs:
+                header.append(f"ERRORS: {errs}")
+                header.append("")
+            out_path.write_text(("\n".join(header) + raw).strip() + "\n", encoding="utf-8")
 
     do_red_update = True
     if int(red_update_every) > 1 and iteration_index is not None:

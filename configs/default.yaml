@@ -17,7 +17,7 @@ models:
   red:
     path: Qwen/Qwen2.5-32B-Instruct
     # params_b: 32.0  # optional override
-    quantization: 4bit
+    quantization: none
     adapter_dir: runs/red_lora
     save_adapters: false  # do not save Red adapters by default
     # allowed_gpus: [2, 3]  # optionally pin Red to specific GPUs
@@ -34,20 +34,20 @@ generation:
   red_num_tasks: 3
   red_max_new_tokens: 900
   socratic_num_hints: 6  # 4–8 recommended
-  socratic_max_new_tokens: 220
-  judge_max_new_tokens: 700
+  socratic_max_new_tokens: 400
+  judge_max_new_tokens: 1500
 
 validation:
   python_timeout_s: 2.5
   max_tests: 12
-  min_tests: 6
+  min_tests: 2
   require_buggy_passes_some: true
 
 training:
   grpo:
-    group_size: 8
+    group_size: 6
     ppo_clip: 0.2
-    lr: 2.0e-5
+    lr: 6.0e-5
     weight_decay: 0.0
     max_grad_norm: 1.0
     micro_batch_size: 1

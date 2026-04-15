@@ -46,12 +46,13 @@ def generate_red_tasks(
     lm: Optional[object] = None,
     rng: Optional[random.Random] = None,
     debug: bool = False,
+    save_raw: bool = False,
 ) -> RedGenResult:
     num = int(num_tasks or cfg.generation.red_num_tasks)
     bucket = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
     rng = rng or random.Random()
     debug_dir = Path(cfg.logging.out_dir) / "debug"
-    if debug:
+    if debug or save_raw:
         debug_dir.mkdir(parents=True, exist_ok=True)
     session_tag = str(time.time_ns())
 
@@ -133,7 +134,7 @@ def generate_red_tasks(
                 gen_ids = seq
             text = tok.decode(gen_ids, skip_special_tokens=True)
             texts.append(text)
-            if debug:
+            if debug or save_raw:
                 # Keep a raw trace per attempt when debugging why tasks are not being accepted.
                 # This is separate from the final `red_last_completion.txt` snapshot written by the pipeline.
                 out_path = debug_dir / f"red_gen_raw_{session_tag}_call{call_index}_attempt{attempt}.txt"
