@@ -3,6 +3,9 @@ from __future__ import annotations
 from textwrap import dedent
 
 
+DEFAULT_RED_TRAINING_CODE_LINES_HINT = "7-45"
+
+
 def red_task_generation_prompt(*, curriculum_bucket: str, min_tests: int, code_lines_hint: str) -> str:
     return dedent(
         f"""
@@ -52,3 +55,11 @@ def red_task_generation_prompt(*, curriculum_bucket: str, min_tests: int, code_l
         - Ensure the task is non-trivial (>= 2 reasoning steps) and has multiple meaningful tests.
         """
     ).strip()
+
+
+def red_task_training_prompt(*, curriculum_bucket: str, min_tests: int) -> str:
+    return red_task_generation_prompt(
+        curriculum_bucket=curriculum_bucket,
+        min_tests=min_tests,
+        code_lines_hint=DEFAULT_RED_TRAINING_CODE_LINES_HINT,
+    )

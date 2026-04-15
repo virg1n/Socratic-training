@@ -21,6 +21,7 @@ def judge_prompt_directness_relevance(
     difficulty: str,
     statement: str,
     student_code: str,
+    observed_failure: str,
     hints: list[str],
 ) -> str:
     """
@@ -35,8 +36,7 @@ def judge_prompt_directness_relevance(
         f"""
         You are Judge, a strict evaluator of Socratic tutoring hints for beginner Python.
 
-        Think step-by-step inside <think>...</think>.
-        After </think>, output JSON only (no markdown, no extra text).
+        Output JSON only. Do not output <think> blocks, chain-of-thought, markdown, or extra text.
 
         Context:
         Topic: {topic}
@@ -47,6 +47,9 @@ def judge_prompt_directness_relevance(
 
         Student code (buggy):
         {student_code}
+
+        Observed failure:
+        {observed_failure}
 
         Hints to evaluate:
         {hints_block}
@@ -86,6 +89,7 @@ def judge_prompt_pedagogy_localization(
     difficulty: str,
     statement: str,
     student_code: str,
+    observed_failure: str,
     hints: list[str],
 ) -> str:
     """
@@ -98,8 +102,7 @@ def judge_prompt_pedagogy_localization(
         f"""
         You are Judge, a strict evaluator of Socratic tutoring hints for beginner Python.
 
-        Think step-by-step inside <think>...</think>.
-        After </think>, output JSON only (no markdown, no extra text).
+        Output JSON only. Do not output <think> blocks, chain-of-thought, markdown, or extra text.
 
         Context:
         Topic: {topic}
@@ -110,6 +113,9 @@ def judge_prompt_pedagogy_localization(
 
         Student code (buggy):
         {student_code}
+
+        Observed failure:
+        {observed_failure}
 
         Hints to evaluate:
         {hints_block}
@@ -139,3 +145,69 @@ def judge_prompt_pedagogy_localization(
         """
     ).strip()
 
+
+def judge_prompt_hint_validation(
+    *,
+    topic: str,
+    difficulty: str,
+    statement: str,
+    student_code: str,
+    observed_failure: str,
+    hints: list[str],
+) -> str:
+    hints_block = _hints_block(hints)
+    return dedent(
+        f"""
+        You are Judge, a strict validator of Socratic tutoring hints for beginner Python.
+
+        Output JSON only. Do not output <think> blocks, chain-of-thought, markdown, or extra text.
+
+        Context:
+        Topic: {topic}
+        Difficulty: {difficulty}
+
+        Problem:
+        {statement}
+
+        Student code (buggy):
+        {student_code}
+
+        Observed failure:
+        {observed_failure}
+
+        Hints to validate:
+        {hints_block}
+
+        Mark a hint as invalid if it does any of the following:
+        - gives the final answer
+        - provides full or near-full corrected code
+        - directly tells the exact fix instead of guiding discovery
+        - is generic enough to fit many unrelated bugs
+        - is empty, malformed, or exposes chain-of-thought
+
+        Allowed issue labels:
+        - answer_dump
+        - too_direct
+        - generic
+        - not_actionable
+        - chain_of_thought
+        - malformed
+
+        Output EXACTLY this JSON schema:
+        {{
+          "items": [
+            {{
+              "id": 0,
+              "valid": true,
+              "issues": [],
+              "notes": ""
+            }}
+          ]
+        }}
+
+        Requirements:
+        - Provide one item for every hint id 0..{len(hints)-1}.
+        - Use only the allowed issue labels.
+        - Keep `notes` short and concrete.
+        """
+    ).strip()

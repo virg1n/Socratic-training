@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from socratic_training.config import AppConfig
+from socratic_training.curriculum import load_curriculum
 from socratic_training.models.loader import load_red
+from socratic_training.red.prompts import red_task_training_prompt
 from socratic_training.utils.io import read_yaml
 
 
@@ -45,6 +47,7 @@ def train_red_dpo_from_pairs(
     pairs_path = Path(cfg.logging.red_dpo_pairs_path)
     if not pairs_path.exists():
         raise FileNotFoundError(f"DPO pairs not found: {pairs_path}")
+    curriculum = load_curriculum(Path(cfg.curriculum_path))
 
     pairs: List[Dict[str, Any]] = []
     for line in pairs_path.read_text(encoding="utf-8").splitlines():
@@ -75,6 +78,19 @@ def train_red_dpo_from_pairs(
 
     dl = DataLoader(pairs, batch_size=micro_batch_size, shuffle=True, collate_fn=collate)
 
+    def _normalize_prompt(record: Dict[str, Any]) -> str:
+        prompt = str(record.get("prompt", "") or "").strip()
+        if prompt and not prompt.startswith("TOPIC:"):
+            return prompt
+        topic = str(record.get("topic", "") or "").strip()
+        difficulty = str(record.get("difficulty", "") or "").strip()
+        if topic and difficulty:
+            return red_task_training_prompt(
+                curriculum_bucket=curriculum.bucket_prompt(topic=topic, difficulty=difficulty),
+                min_tests=cfg.validation.min_tests,
+            )
+        return prompt
+
     with load_red(cfg.models.red, for_training=True) as lm:
         model = lm.model
         tok = lm.tokenizer
@@ -93,7 +109,7 @@ def train_red_dpo_from_pairs(
         ref_cache: List[Tuple[float, float, int, int, List[int], List[int]]] = []
         with torch.no_grad():
             for r in pairs:
-                prompt = str(r["prompt"])
+                prompt = _normalize_prompt(r)
                 chosen = json.dumps(r["chosen"], ensure_ascii=False) if isinstance(r["chosen"], (dict, list)) else str(r["chosen"])
                 rejected = (
                     json.dumps(r["rejected"], ensure_ascii=False) if isinstance(r["rejected"], (dict, list)) else str(r["rejected"])

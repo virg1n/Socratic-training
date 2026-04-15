@@ -68,7 +68,7 @@ memory:
   auto_reduce: true
   min_max_new_tokens: 96
   min_num_hints: 4
-  min_red_num_tasks: 6
+  min_red_num_tasks: 3
 
 # Optional: keep models loaded when using `socratic-train run-loop` (requires enough GPU memory, or pin GPUs via allowed_gpus).
 execution:

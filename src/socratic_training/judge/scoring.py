@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from socratic_training.config import AppConfig
-from socratic_training.judge.rubric import judge_prompt_directness_relevance, judge_prompt_pedagogy_localization
+from socratic_training.judge.rubric import (
+    judge_prompt_directness_relevance,
+    judge_prompt_hint_validation,
+    judge_prompt_pedagogy_localization,
+)
 from socratic_training.models.loader import load_judge
 from socratic_training.utils.chat import build_model_inputs, move_to_device
 from socratic_training.utils.json import extract_first_json
@@ -16,6 +20,8 @@ class HintScore:
     subscores: Dict[str, int]
     answer_dump: bool
     final_reward: float
+    valid: bool = True
+    validation_issues: Tuple[str, ...] = ()
     notes: str = ""
 
 
@@ -35,6 +41,31 @@ def _clamp_int(v: object, *, lo: int, hi: int) -> int:
     return max(lo, min(hi, iv))
 
 
+def _coerce_bool(v: object, *, default: bool) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in {"true", "1", "yes"}:
+            return True
+        if s in {"false", "0", "no"}:
+            return False
+    return default
+
+
+def _coerce_issue_list(v: object) -> Tuple[str, ...]:
+    if not isinstance(v, list):
+        return ()
+    out: List[str] = []
+    for item in v:
+        s = str(item).strip().lower().replace(" ", "_")
+        if s:
+            out.append(s)
+    return tuple(dict.fromkeys(out))
+
+
 def _has_think_tags(text: str) -> bool:
     t = (text or "").lower()
     return "<think" in t or "</think>" in t
@@ -48,19 +79,24 @@ def _heuristic_answer_dump(text: str) -> bool:
     s = (text or "").strip()
     if not s:
         return False
-    # Large multi-line outputs are often full solutions.
     nonempty = sum(1 for ln in s.splitlines() if ln.strip())
     if nonempty >= 14:
         return True
-    # Code fences with multiple lines strongly indicate dumping code.
     if "```" in s and nonempty >= 6:
         return True
     return False
 
 
-def _reward_from_subscores(sub: Dict[str, int], *, answer_dump: bool) -> float:
+def _reward_from_subscores(
+    cfg: AppConfig,
+    sub: Dict[str, int],
+    *,
+    answer_dump: bool,
+    valid: bool,
+    validation_issues: Tuple[str, ...],
+) -> float:
     """
-    Weighted reward with a multiplicative penalty for answer dumps.
+    Weighted reward with config-driven penalties for answer dumps and validation failures.
 
     Subscores:
     - not_too_direct: 0..10 (higher is better)
@@ -78,8 +114,15 @@ def _reward_from_subscores(sub: Dict[str, int], *, answer_dump: bool) -> float:
     for k, weight in w.items():
         base += weight * float(sub.get(k, 0))
 
+    beta = max(0.0, float(cfg.training.grpo.beta_answer_dump_penalty))
     if answer_dump:
-        base *= 0.2
+        base *= 1.0 / (1.0 + (1.5 * beta))
+    if not valid:
+        base -= max(1.0, beta * (2.0 if answer_dump else 1.0))
+    if "chain_of_thought" in validation_issues:
+        base -= max(1.0, beta / 2.0)
+    if "malformed" in validation_issues:
+        base -= max(1.0, beta / 2.0)
     return base
 
 
@@ -90,6 +133,7 @@ def score_hints(
     difficulty: str,
     statement: str,
     student_code: str,
+    observed_failure: str,
     hints: List[str],
 ) -> JudgeResult:
     with load_judge(cfg.models.judge) as lm:
@@ -100,6 +144,7 @@ def score_hints(
             difficulty=difficulty,
             statement=statement,
             student_code=student_code,
+            observed_failure=observed_failure,
             hints=hints,
         )
 
@@ -112,6 +157,7 @@ def score_hints_with_lm(
     difficulty: str,
     statement: str,
     student_code: str,
+    observed_failure: str,
     hints: List[str],
 ) -> JudgeResult:
     errors: List[str] = []
@@ -149,11 +195,22 @@ def score_hints_with_lm(
             errors.append(f"judge_json_parse_error[{stage}]: {e}")
             return None, text
 
+    prompt_v = judge_prompt_hint_validation(
+        topic=topic,
+        difficulty=difficulty,
+        statement=statement,
+        student_code=student_code,
+        observed_failure=observed_failure,
+        hints=hints,
+    )
+    obj_v, text_v = _generate_json("validation", prompt_v)
+
     prompt_a = judge_prompt_directness_relevance(
         topic=topic,
         difficulty=difficulty,
         statement=statement,
         student_code=student_code,
+        observed_failure=observed_failure,
         hints=hints,
     )
     obj_a, text_a = _generate_json("directness_relevance", prompt_a)
@@ -163,6 +220,7 @@ def score_hints_with_lm(
         difficulty=difficulty,
         statement=statement,
         student_code=student_code,
+        observed_failure=observed_failure,
         hints=hints,
     )
     obj_b, text_b = _generate_json("pedagogy_localization", prompt_b)
@@ -175,6 +233,9 @@ def score_hints_with_lm(
             "pedagogical_value": 0,
             "bug_localization_help": 0,
             "answer_dump": None,
+            "valid": True,
+            "issues": (),
+            "notes": "",
         }
         for i in range(n)
     }
@@ -204,6 +265,25 @@ def score_hints_with_lm(
     _ingest("directness_relevance", obj_a, fields=("not_too_direct", "relevant", "answer_dump"))
     _ingest("pedagogy_localization", obj_b, fields=("pedagogical_value", "bug_localization_help"))
 
+    if isinstance(obj_v, dict):
+        items = obj_v.get("items", [])
+        if not isinstance(items, list):
+            errors.append("judge_items_invalid[validation]")
+        else:
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                try:
+                    hid = int(it.get("id", -1))
+                except Exception:
+                    continue
+                if hid not in by_id:
+                    continue
+                rec = by_id[hid]
+                rec["valid"] = it.get("valid", True)
+                rec["issues"] = _coerce_issue_list(it.get("issues", []))
+                rec["notes"] = str(it.get("notes", "") or "").strip()
+
     scores: List[HintScore] = []
     for hid in range(n):
         rec = by_id[hid]
@@ -214,12 +294,20 @@ def score_hints_with_lm(
             "bug_localization_help": _clamp_int(rec.get("bug_localization_help"), lo=0, hi=5),
         }
         has_think = _has_think_tags(hints[hid])
+        validation_issues = _coerce_issue_list(rec.get("issues", ()))
+        valid = _coerce_bool(rec.get("valid"), default=True)
         dump_flag = rec.get("answer_dump", None)
         if dump_flag is None:
-            dump = _heuristic_answer_dump(hints[hid])
+            dump = _heuristic_answer_dump(hints[hid]) or ("answer_dump" in validation_issues)
         else:
-            dump = bool(dump_flag)
-        reward = _reward_from_subscores(subs, answer_dump=dump)
+            dump = _coerce_bool(dump_flag, default=False) or ("answer_dump" in validation_issues)
+        reward = _reward_from_subscores(
+            cfg,
+            subs,
+            answer_dump=dump,
+            valid=valid,
+            validation_issues=validation_issues,
+        )
         if has_think:
             reward *= 0.2
         scores.append(
@@ -228,10 +316,16 @@ def score_hints_with_lm(
                 subscores=subs,
                 answer_dump=dump,
                 final_reward=float(reward),
-                notes="",
+                valid=valid,
+                validation_issues=validation_issues,
+                notes=str(rec.get("notes", "") or ""),
             )
         )
 
     ranking = [s.id for s in sorted(scores, key=lambda x: x.final_reward, reverse=True)]
-    raw_text = f"=== directness_relevance ===\n{text_a}\n\n=== pedagogy_localization ===\n{text_b}"
+    raw_text = (
+        f"=== validation ===\n{text_v}\n\n"
+        f"=== directness_relevance ===\n{text_a}\n\n"
+        f"=== pedagogy_localization ===\n{text_b}"
+    )
     return JudgeResult(scores=scores, ranking=ranking, raw_text=raw_text, errors=tuple(errors))

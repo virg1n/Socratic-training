@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -12,10 +13,27 @@ from socratic_training.utils.chat import build_model_inputs, move_to_device
 @dataclass
 class HintGenResult:
     hints: List[str]
-    prompt_ids: List[int]
+    prompt_ids: List[List[int]]
     completion_ids: List[List[int]]
     raw_text: str
     errors: Tuple[str, ...] = ()
+
+
+_HINT_FOCUS_ROTATION = (
+    "Focus on the first failing test and ask what value the code produces versus what the assert expects.",
+    "Focus on tracing loop bounds, iteration counts, or stopping conditions by hand on a tiny example.",
+    "Focus on how a key state variable changes over time, such as an accumulator, index, counter, or temporary value.",
+    "Focus on whether the code takes the correct branch or condition for the failing case.",
+    "Focus on whether helper functions receive and return the values the outer function expects.",
+    "Focus on checking the smallest edge case that should pass and comparing it with the current behavior.",
+)
+
+
+def _normalize_hint_text(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    lowered = re.sub(r"\s+", " ", lowered)
+    lowered = re.sub(r"[^\w\s]", "", lowered)
+    return lowered.strip()
 
 
 def _summarize_failure_text(observed_failure: str, *, max_lines: int = 40) -> str:
@@ -65,37 +83,45 @@ def generate_hints_with_lm(
     num_hints: Optional[int] = None,
 ) -> HintGenResult:
     n = int(num_hints or cfg.generation.socratic_num_hints)
-    prompt = socratic_single_hint_prompt(
-        statement=statement,
-        student_code=student_code,
-        failure_summary=_summarize_failure_text(observed_failure),
-        topic=topic,
-        difficulty=difficulty,
-    )
-
     errors: List[str] = []
     model = lm.model
     tok = lm.tokenizer
-
-    base_inputs = build_model_inputs(tok, user_text=prompt)
-    prompt_ids = base_inputs["input_ids"][0].tolist()
     try:
         device = model.get_input_embeddings().weight.device
     except Exception:  # pragma: no cover
         device = next(model.parameters()).device
 
-    prompt_len = base_inputs["input_ids"].shape[1]
-    prompt_ids_tensor = base_inputs["input_ids"][0]
+    failure_summary = _summarize_failure_text(observed_failure)
+    max_attempts = max(n * 3, n + 4)
+    seen_hints = set()
+    prompt_ids: List[List[int]] = []
     completion_ids: List[List[int]] = []
     hints: List[str] = []
+    raw_items: List[str] = []
     eos = tok.eos_token_id
-    for _ in range(n):
+    attempts = 0
+
+    while len(hints) < n and attempts < max_attempts:
+        focus_instruction = _HINT_FOCUS_ROTATION[attempts % len(_HINT_FOCUS_ROTATION)]
+        prompt = socratic_single_hint_prompt(
+            statement=statement,
+            student_code=student_code,
+            failure_summary=failure_summary,
+            topic=topic,
+            difficulty=difficulty,
+            focus_instruction=focus_instruction,
+            previous_hints=tuple(hints[-3:]),
+        )
+
+        base_inputs = build_model_inputs(tok, user_text=prompt)
+        prompt_len = base_inputs["input_ids"].shape[1]
+        prompt_ids_tensor = base_inputs["input_ids"][0]
         inputs = move_to_device(base_inputs, device)
         out = model.generate(
             **inputs,
             max_new_tokens=cfg.generation.socratic_max_new_tokens,
             do_sample=True,
-            temperature=1.10,
+            temperature=0.95,
             top_p=0.95,
             num_return_sequences=1,
             pad_token_id=tok.eos_token_id,
@@ -111,22 +137,33 @@ def generate_hints_with_lm(
         comp = comp_ids.tolist()
         if eos in comp:
             comp = comp[: comp.index(eos)]
-        # Drop trailing pads/eos leftovers (best-effort).
         while comp and comp[-1] in {eos, tok.pad_token_id}:
             comp.pop()
+
+        hint_text = tok.decode(comp, skip_special_tokens=True).strip()
+        raw_items.append(f"[attempt {attempts}] {hint_text}")
+        attempts += 1
+        if not hint_text:
+            errors.append("generated empty hint")
+            continue
+
+        normalized = _normalize_hint_text(hint_text)
+        if normalized in seen_hints:
+            errors.append("generated duplicate hint")
+            continue
+
+        seen_hints.add(normalized)
+        prompt_ids.append(prompt_ids_tensor.tolist())
         completion_ids.append(comp)
-        hints.append(tok.decode(comp, skip_special_tokens=True).strip())
+        hints.append(hint_text)
 
-    # Keep a raw concatenated view for debugging/logging.
-    text = "\n\n".join([f"[{i}] {h}" for i, h in enumerate(hints)])
-
-    hints = [h for h in hints if h]
+    text = "\n\n".join(raw_items)
     if len(hints) < n:
-        errors.append(f"expected {n} hints, got {len(hints)} (some were empty)")
+        errors.append(f"expected {n} distinct hints, got {len(hints)}")
 
     return HintGenResult(
         hints=hints[:n],
-        prompt_ids=prompt_ids,
+        prompt_ids=prompt_ids[:n],
         completion_ids=completion_ids[:n],
         raw_text=text,
         errors=tuple(errors),

@@ -14,6 +14,7 @@ from socratic_training.memory import preflight_and_autoscale
 from socratic_training.models.loader import load_judge, load_socratic
 from socratic_training.pipeline.bucket_select import choose_bucket
 from socratic_training.red.generator import generate_red_tasks
+from socratic_training.red.prompts import red_task_training_prompt
 from socratic_training.red.schema import RedTask
 from socratic_training.rl.grpo import GrpoTrajectory, train_socratic_grpo
 from socratic_training.socratic.hints import generate_hints_with_lm
@@ -368,6 +369,7 @@ def run_iteration_cfg(
                     difficulty=t.difficulty,
                     statement=t.statement,
                     student_code=t.code,
+                    observed_failure=str(getattr(item["validation"], "observed_failure", "") or ""),
                     hints=list(hints),
                 )
                 judged.append({**item, "judge_result": jr})
@@ -429,7 +431,10 @@ def run_iteration_cfg(
 
     if do_red_update:
         # Build DPO preference pairs for Red: prefer tasks where Socratic struggled.
-        bucket_prompt = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
+        bucket_prompt = red_task_training_prompt(
+            curriculum_bucket=curriculum.bucket_prompt(topic=topic, difficulty=difficulty),
+            min_tests=cfg.validation.min_tests,
+        )
         best_by_task: List[Tuple[float, Dict[str, object]]] = []
         for item in judged:
             jr = item["judge_result"]
@@ -475,7 +480,7 @@ def run_iteration_cfg(
         jr = item["judge_result"]
 
         hints: List[str] = list(getattr(hg, "hints", []))
-        prompt_ids: List[int] = list(getattr(hg, "prompt_ids", []))
+        prompt_ids_per_hint: List[List[int]] = list(getattr(hg, "prompt_ids", []))
         completion_ids: List[List[int]] = list(getattr(hg, "completion_ids", []))
 
         # Map hint id -> reward (default pessimistic).
@@ -486,10 +491,10 @@ def run_iteration_cfg(
         best = max(reward_map.values()) if reward_map else -5.0
         per_task_best.append((task_index, best))
 
-        for hid in range(min(len(hints), len(completion_ids))):
+        for hid in range(min(len(hints), len(completion_ids), len(prompt_ids_per_hint))):
             trajectories.append(
                 GrpoTrajectory(
-                    prompt_ids=prompt_ids,
+                    prompt_ids=prompt_ids_per_hint[hid],
                     completion_ids=completion_ids[hid],
                     reward=reward_map.get(hid, -5.0),
                     group_id=task_index,
@@ -542,6 +547,8 @@ def run_iteration_cfg(
                                 "subscores": s.subscores,
                                 "answer_dump": s.answer_dump,
                                 "final_reward": s.final_reward,
+                                "valid": s.valid,
+                                "validation_issues": list(s.validation_issues),
                                 "notes": s.notes,
                             }
                             for s in getattr(jr, "scores", [])

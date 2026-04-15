@@ -377,6 +377,18 @@ def preflight_and_autoscale(cfg: AppConfig, *, curriculum: Curriculum, dry_run: 
         def _reduce_tokens(path: str, current: int) -> int:
             return max(cfg.memory.min_max_new_tokens, int(math.floor(current * 0.75)))
 
+        def _effective_floor(current: int, configured_floor: int) -> int:
+            current = max(1, int(current))
+            configured_floor = max(1, int(configured_floor))
+            return min(current, configured_floor)
+
+        def _reduce_count(current: int, configured_floor: int) -> int:
+            current = max(1, int(current))
+            floor = _effective_floor(current, configured_floor)
+            if current <= floor:
+                return current
+            return max(floor, int(math.floor(current * 0.75)))
+
         # Prioritize reducing the longest generations first.
         cfg.generation.judge_max_new_tokens = _reduce_tokens(
             "generation.judge_max_new_tokens", cfg.generation.judge_max_new_tokens
@@ -389,16 +401,8 @@ def preflight_and_autoscale(cfg: AppConfig, *, curriculum: Curriculum, dry_run: 
         )
 
         # Reduce generations (num_hints/tasks) if still too heavy.
-        cfg.generation.socratic_num_hints = max(cfg.memory.min_num_hints, int(cfg.generation.socratic_num_hints))
-        if cfg.generation.socratic_num_hints > cfg.memory.min_num_hints:
-            cfg.generation.socratic_num_hints = max(
-                cfg.memory.min_num_hints, int(math.floor(cfg.generation.socratic_num_hints * 0.75))
-            )
-        cfg.generation.red_num_tasks = max(cfg.memory.min_red_num_tasks, int(cfg.generation.red_num_tasks))
-        if cfg.generation.red_num_tasks > cfg.memory.min_red_num_tasks:
-            cfg.generation.red_num_tasks = max(
-                cfg.memory.min_red_num_tasks, int(math.floor(cfg.generation.red_num_tasks * 0.75))
-            )
+        cfg.generation.socratic_num_hints = _reduce_count(cfg.generation.socratic_num_hints, cfg.memory.min_num_hints)
+        cfg.generation.red_num_tasks = _reduce_count(cfg.generation.red_num_tasks, cfg.memory.min_red_num_tasks)
 
         # Keep GRPO group_size aligned with number of hints we generate.
         cfg.training.grpo.group_size = min(cfg.training.grpo.group_size, cfg.generation.socratic_num_hints)

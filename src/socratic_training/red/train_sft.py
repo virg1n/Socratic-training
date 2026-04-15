@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from socratic_training.config import AppConfig
 from socratic_training.curriculum import load_curriculum
 from socratic_training.models.loader import load_red
+from socratic_training.red.prompts import red_task_training_prompt
 from socratic_training.utils.io import read_yaml
 
 
@@ -59,7 +60,10 @@ def train_red_sft_from_hard_buffer(
         task = r.get("task", {})
         if not isinstance(task, dict):
             continue
-        prompt = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
+        prompt = red_task_training_prompt(
+            curriculum_bucket=curriculum.bucket_prompt(topic=topic, difficulty=difficulty),
+            min_tests=cfg.validation.min_tests,
+        )
         response = json.dumps(task, ensure_ascii=False)
         examples.append({"prompt": prompt, "response": response})
 

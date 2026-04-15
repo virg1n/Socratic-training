@@ -11,7 +11,7 @@ def socratic_hint_prompt(
     topic: str,
     difficulty: str,
     num_hints: int,
-    ) -> str:
+) -> str:
     return dedent(
         f"""
         You are Socratic, a Python tutor.
@@ -19,7 +19,7 @@ def socratic_hint_prompt(
         Goal: help the student fix their code by giving hints and questions.
         DO NOT reveal the final correct solution. DO NOT provide full working code.
         DO NOT output any <think>...</think> blocks or chain-of-thought. Think silently.
-        You may show at most 1–2 short code fragments (<= 2 lines each) if absolutely necessary.
+        You may show at most 1вЂ“2 short code fragments (<= 2 lines each) if absolutely necessary.
 
         The student is working on a curriculum topic: {topic} (difficulty: {difficulty})
 
@@ -53,7 +53,19 @@ def socratic_single_hint_prompt(
     failure_summary: str,
     topic: str,
     difficulty: str,
+    focus_instruction: str = "",
+    previous_hints: tuple[str, ...] = (),
 ) -> str:
+    focus_block = ""
+    if focus_instruction.strip():
+        focus_block = f"\n## Focus\n{focus_instruction.strip()}\n"
+
+    previous_block = ""
+    if previous_hints:
+        prior = "\n".join([f"- {hint}" for hint in previous_hints if hint.strip()])
+        if prior:
+            previous_block = f"\n## Avoid Repeating\n{prior}\n"
+
     return dedent(
         f"""
         You are Socratic, a Python tutor.
@@ -77,9 +89,11 @@ def socratic_single_hint_prompt(
         ```text
         {failure_summary}
         ```
+        {focus_block}{previous_block}
 
         ## Instruction
-        Ask 1–2 guiding questions (or one concise hint) that help me discover the mistake without giving the answer.
+        Ask 1вЂ“2 guiding questions (or one concise hint) that help me discover the mistake without giving the answer.
+        Make this hint materially different from any prior hints listed above.
         Output plain text only (no JSON, no lists).
         """
     ).strip()
