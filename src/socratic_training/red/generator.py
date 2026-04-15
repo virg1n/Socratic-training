@@ -58,17 +58,14 @@ def generate_red_tasks(
     def _nonempty_line_count(code: str) -> int:
         return sum(1 for line in str(code).splitlines() if line.strip())
 
-    def _sample_target_line_policy() -> Tuple[str, Tuple[int, int], Tuple[int, int], int]:
+    def _sample_target_line_policy() -> Tuple[str, Tuple[int, int], int]:
         r = rng.random()
         # 15%: short (<10 lines), 70%: medium (20-25), 15%: long (>30).
         if r < 0.15:
-            # strict (7-9), fallback (5-15)
-            return ("short", (7, 9), (5, 15), 420)
+            return ("short", (7, 9), 420)
         if r < 0.85:
-            # strict (20-25), fallback (16-32)
-            return ("medium", (20, 25), (16, 32), 700)
-        # strict (31-40), fallback (28-55)
-        return ("long", (31, 40), (28, 55), int(cfg.generation.red_max_new_tokens))
+            return ("medium", (20, 25), 700)
+        return ("long", (31, 40), int(cfg.generation.red_max_new_tokens))
 
     def _prompt_for_target(target_min: int, target_max: int) -> str:
         return red_task_generation_prompt(
@@ -91,25 +88,22 @@ def generate_red_tasks(
         model = lm_obj.model
         tok = lm_obj.tokenizer
 
-        policy, strict_rng, fallback_rng, policy_max_new = _sample_target_line_policy()
-        target_min, target_max = strict_rng
-        fb_min, fb_max = fallback_rng
+        policy, (target_min, target_max), policy_max_new = _sample_target_line_policy()
         prompt = _prompt_for_target(target_min, target_max)
         if debug:
             print(
-                f"[debug-red-gen] start call={call_index} policy={policy} strict={target_min}-{target_max} "
-                f"fallback={fb_min}-{fb_max} max_new_tokens={min(int(cfg.generation.red_max_new_tokens), int(policy_max_new))}"
+                f"[debug-red-gen] start call={call_index} policy={policy} target={target_min}-{target_max} "
+                f"max_new_tokens={min(int(cfg.generation.red_max_new_tokens), int(policy_max_new))}"
             )
 
         text = ""
         for attempt, gen_kwargs in enumerate(attempt_settings, start=1):
-            accept_min, accept_max = (target_min, target_max) if attempt == 1 else (fb_min, fb_max)
             user_prompt = prompt
             if attempt > 1:
                 user_prompt = (
                     prompt
                     + "\n\nCRITICAL REMINDER: You MAY include a <think>...</think> block, but then output exactly one JSON object and nothing after it. The JSON must start with '{' and end with '}'."
-                    + f"\nTarget code length should be about {target_min}-{target_max} non-empty lines (acceptance for this retry: {accept_min}-{accept_max})."
+                    + f"\nTarget code length should be about {target_min}-{target_max} non-empty lines."
                 )
 
             inputs = build_model_inputs(tok, user_text=user_prompt)
@@ -183,21 +177,9 @@ def generate_red_tasks(
 
                 task = RedTask.parse_obj(task_obj)
                 lines = _nonempty_line_count(task.code)
-                if lines < accept_min or lines > accept_max:
-                    if debug:
-                        print(
-                            f"[debug-red-gen] call={call_index} attempt={attempt} reject=code_lines "
-                            f"policy={policy} expected={accept_min}-{accept_max} got={lines}"
-                        )
-                    errors.append(
-                        f"call{call_index}: attempt{attempt}: code_lines_out_of_range "
-                        f"policy={policy} expected={accept_min}-{accept_max} got={lines}"
-                    )
-                    continue
                 if debug:
                     print(
-                        f"[debug-red-gen] call={call_index} attempt={attempt} policy={policy} "
-                        f"lines={lines} strict={target_min}-{target_max} accepted={accept_min}-{accept_max}"
+                        f"[debug-red-gen] call={call_index} attempt={attempt} policy={policy} lines={lines} target={target_min}-{target_max}"
                     )
                 return task
             except Exception as e:
