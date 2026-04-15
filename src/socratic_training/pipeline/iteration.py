@@ -482,6 +482,10 @@ def run_iteration_cfg(
         hints: List[str] = list(getattr(hg, "hints", []))
         prompt_ids_per_hint: List[List[int]] = list(getattr(hg, "prompt_ids", []))
         completion_ids: List[List[int]] = list(getattr(hg, "completion_ids", []))
+        if prompt_ids_per_hint:
+            ref_prompt_ids = prompt_ids_per_hint[0]
+            if any(ids != ref_prompt_ids for ids in prompt_ids_per_hint[1:]):
+                raise RuntimeError("GRPO requires identical prompt_ids within each task group.")
 
         # Map hint id -> reward (default pessimistic).
         reward_map: Dict[int, float] = {i: -5.0 for i in range(len(hints))}

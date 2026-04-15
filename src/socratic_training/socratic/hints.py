@@ -19,16 +19,6 @@ class HintGenResult:
     errors: Tuple[str, ...] = ()
 
 
-_HINT_FOCUS_ROTATION = (
-    "Focus on the first failing test and ask what value the code produces versus what the assert expects.",
-    "Focus on tracing loop bounds, iteration counts, or stopping conditions by hand on a tiny example.",
-    "Focus on how a key state variable changes over time, such as an accumulator, index, counter, or temporary value.",
-    "Focus on whether the code takes the correct branch or condition for the failing case.",
-    "Focus on whether helper functions receive and return the values the outer function expects.",
-    "Focus on checking the smallest edge case that should pass and comparing it with the current behavior.",
-)
-
-
 def _normalize_hint_text(text: str) -> str:
     lowered = (text or "").strip().lower()
     lowered = re.sub(r"\s+", " ", lowered)
@@ -91,7 +81,18 @@ def generate_hints_with_lm(
     except Exception:  # pragma: no cover
         device = next(model.parameters()).device
 
-    failure_summary = _summarize_failure_text(observed_failure)
+    prompt = socratic_single_hint_prompt(
+        statement=statement,
+        student_code=student_code,
+        failure_summary=_summarize_failure_text(observed_failure),
+        topic=topic,
+        difficulty=difficulty,
+    )
+    base_inputs = build_model_inputs(tok, user_text=prompt)
+    prompt_len = base_inputs["input_ids"].shape[1]
+    prompt_ids_tensor = base_inputs["input_ids"][0]
+    prompt_ids_list = prompt_ids_tensor.tolist()
+
     max_attempts = max(n * 3, n + 4)
     seen_hints = set()
     prompt_ids: List[List[int]] = []
@@ -102,20 +103,6 @@ def generate_hints_with_lm(
     attempts = 0
 
     while len(hints) < n and attempts < max_attempts:
-        focus_instruction = _HINT_FOCUS_ROTATION[attempts % len(_HINT_FOCUS_ROTATION)]
-        prompt = socratic_single_hint_prompt(
-            statement=statement,
-            student_code=student_code,
-            failure_summary=failure_summary,
-            topic=topic,
-            difficulty=difficulty,
-            focus_instruction=focus_instruction,
-            previous_hints=tuple(hints[-3:]),
-        )
-
-        base_inputs = build_model_inputs(tok, user_text=prompt)
-        prompt_len = base_inputs["input_ids"].shape[1]
-        prompt_ids_tensor = base_inputs["input_ids"][0]
         inputs = move_to_device(base_inputs, device)
         out = model.generate(
             **inputs,
@@ -153,7 +140,7 @@ def generate_hints_with_lm(
             continue
 
         seen_hints.add(normalized)
-        prompt_ids.append(prompt_ids_tensor.tolist())
+        prompt_ids.append(prompt_ids_list)
         completion_ids.append(comp)
         hints.append(hint_text)
 

@@ -115,15 +115,24 @@ def _reward_from_subscores(
         base += weight * float(sub.get(k, 0))
 
     beta = max(0.0, float(cfg.training.grpo.beta_answer_dump_penalty))
+    normalized_issues = set(validation_issues)
     if answer_dump:
-        base *= 1.0 / (1.0 + (1.5 * beta))
+        normalized_issues.add("answer_dump")
+
+    issue_penalties = {
+        "answer_dump": 25.0,
+        "too_direct": 8.0,
+        "generic": 4.0,
+        "not_actionable": 4.0,
+        "chain_of_thought": 10.0,
+        "malformed": 10.0,
+    }
+
+    penalties = 0.0
     if not valid:
-        base -= max(1.0, beta * (2.0 if answer_dump else 1.0))
-    if "chain_of_thought" in validation_issues:
-        base -= max(1.0, beta / 2.0)
-    if "malformed" in validation_issues:
-        base -= max(1.0, beta / 2.0)
-    return base
+        penalties += beta * 5.0
+    penalties += beta * sum(issue_penalties.get(issue, 0.0) for issue in normalized_issues)
+    return base - penalties
 
 
 def score_hints(
