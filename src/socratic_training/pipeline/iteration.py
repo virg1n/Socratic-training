@@ -120,6 +120,10 @@ def run_iteration_cfg(
     debug_dir.mkdir(parents=True, exist_ok=True)
     raw_debug = "\n\n".join([f"### CALL {i+1}\n{t}" for i, t in enumerate(red.raw_texts[-10:])]) if red.raw_texts else ""
     (debug_dir / "red_last_completion.txt").write_text(raw_debug, encoding="utf-8")
+    iter_tag: Optional[str] = None
+    if debug_red:
+        idx = "?" if iteration_index is None else str(int(iteration_index))
+        iter_tag = f"iter{idx}_{time.time_ns()}"
     if red.errors:
         last_text = red.raw_texts[-1] if red.raw_texts else ""
         append_event(
@@ -157,6 +161,8 @@ def run_iteration_cfg(
     validations = []
     failures_path = Path(cfg.logging.out_dir) / "debug" / "validation_failures.jsonl"
     observed_path = Path(cfg.logging.out_dir) / "debug" / "observed_failures.jsonl"
+    rejects_path = Path(cfg.logging.out_dir) / "debug" / "red_rejects.jsonl"
+    reject_i = 0
     for t in red.tasks:
         v = validate_red_task(cfg, curriculum=curriculum, task=t, seen_fingerprints=seen)
         validations.append(v)
@@ -187,6 +193,25 @@ def run_iteration_cfg(
                     "code_len": len(t.code),
                 },
             )
+            if debug_red:
+                tag = iter_tag or f"iter{time.time_ns()}"
+                out_path = debug_dir / f"red_reject_{tag}_{reject_i}.py"
+                out_path.write_text(t.code, encoding="utf-8")
+                print(f"[debug-red-reject] i={reject_i} reasons={list(v.reasons)} saved_code={out_path}")
+                if v.observed_failure:
+                    print(f"[debug-red-reject] i={reject_i} observed_failure:\n{v.observed_failure}")
+                append_event(
+                    rejects_path,
+                    {
+                        "type": "red_task_reject_debug",
+                        "topic": topic,
+                        "difficulty": difficulty,
+                        "reasons": list(v.reasons),
+                        "saved_code": str(out_path),
+                        "observed_failure": (v.observed_failure or "")[:2000],
+                    },
+                )
+                reject_i += 1
 
     append_event(
         Path(cfg.logging.jsonl_path),
