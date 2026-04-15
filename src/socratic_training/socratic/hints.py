@@ -95,7 +95,7 @@ def generate_hints_with_lm(
             **inputs,
             max_new_tokens=cfg.generation.socratic_max_new_tokens,
             do_sample=True,
-            temperature=0.85,
+            temperature=1.10,
             top_p=0.95,
             num_return_sequences=1,
             pad_token_id=tok.eos_token_id,

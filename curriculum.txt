@@ -5,6 +5,8 @@ DESCRIPTION: simple assignments, arithmetic, and expression tracing
 DIFFICULTIES:
 - beginner
 - easy
+- medium
+- hard
 FORBIDDEN:
 - bitwise operators
 - complex numbers
@@ -26,12 +28,23 @@ KEYWORDS:
 - variable
 - update
 - trace
+SUBTOPIC: compound updates and guards
+OBJECTIVES:
+- use +=, -=, *=, //= safely
+- avoid accidental integer division / order-of-operations mistakes
+- handle edge cases like zero and negative values
+KEYWORDS:
+- update
+- arithmetic
+- precedence
 ---
 TOPIC: conditionals
 DESCRIPTION: beginner branching with boolean comparisons
 DIFFICULTIES:
 - beginner
 - easy
+- medium
+- hard
 FORBIDDEN:
 - pattern matching
 - walrus operator
@@ -51,12 +64,24 @@ KEYWORDS:
 - nested
 - if
 - condition
+SUBTOPIC: boolean logic and boundaries
+OBJECTIVES:
+- write correct boundary checks (inclusive/exclusive)
+- combine conditions with and/or/not correctly
+- avoid contradictory or unreachable branches
+KEYWORDS:
+- boolean
+- and
+- or
+- not
 ---
 TOPIC: loops
 DESCRIPTION: beginner loop tracing and simple accumulation
 DIFFICULTIES:
 - beginner
 - easy
+- medium
+- hard
 FORBIDDEN:
 - generators
 - async iteration
@@ -77,12 +102,24 @@ KEYWORDS:
 - while
 - condition
 - counter
+SUBTOPIC: search and early exit
+OBJECTIVES:
+- scan until a condition is met
+- use break/continue correctly
+- avoid infinite loops and off-by-one errors
+KEYWORDS:
+- break
+- continue
+- search
+- sentinel
 ---
 TOPIC: functions
 DESCRIPTION: defining and calling small functions
 DIFFICULTIES:
 - beginner
 - easy
+- medium
+- hard
 FORBIDDEN:
 - decorators
 - recursion
@@ -103,12 +140,23 @@ KEYWORDS:
 - function call
 - argument
 - return
+SUBTOPIC: multi-function programs
+OBJECTIVES:
+- split a problem into small helper functions
+- keep functions pure and predictable
+- pass data between helpers without globals
+KEYWORDS:
+- helper
+- def
+- return
 ---
 TOPIC: lists
 DESCRIPTION: indexing, updates, and simple iteration
 DIFFICULTIES:
 - beginner
 - easy
+- medium
+- hard
 FORBIDDEN:
 - list comprehensions
 - slicing with steps
@@ -129,3 +177,72 @@ KEYWORDS:
 - list
 - loop
 - total
+SUBTOPIC: filtering and in-place edits
+OBJECTIVES:
+- remove or update elements carefully without skipping items
+- build a new list with a loop (no comprehensions)
+- handle empty lists and single-element lists
+KEYWORDS:
+- filter
+- in-place
+- append
+---
+TOPIC: strings
+DESCRIPTION: basic string processing, splitting, and formatting
+DIFFICULTIES:
+- beginner
+- easy
+- medium
+- hard
+FORBIDDEN:
+- regular expressions
+- advanced unicode normalization
+- file I/O
+SUBTOPIC: indexing and slicing (basic)
+OBJECTIVES:
+- access characters by index safely
+- use simple slices to extract substrings
+KEYWORDS:
+- string
+- index
+- slice
+SUBTOPIC: splitting and joining
+OBJECTIVES:
+- split a string and validate parts
+- join parts with a delimiter
+- strip whitespace reliably
+KEYWORDS:
+- split
+- join
+- strip
+---
+TOPIC: dictionaries
+DESCRIPTION: basic dict usage for lookup and counting
+DIFFICULTIES:
+- beginner
+- easy
+- medium
+- hard
+FORBIDDEN:
+- collections.Counter
+- defaultdict
+- sorting by custom keys
+- file I/O
+SUBTOPIC: safe lookup and defaults
+OBJECTIVES:
+- use get() with defaults
+- check membership with in
+- avoid KeyError
+KEYWORDS:
+- dict
+- get
+- in
+SUBTOPIC: frequency counting
+OBJECTIVES:
+- build frequency tables with loops
+- update counts correctly
+- handle missing keys robustly
+KEYWORDS:
+- count
+- frequency
+- update

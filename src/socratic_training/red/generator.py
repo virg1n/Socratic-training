@@ -60,12 +60,13 @@ def generate_red_tasks(
 
     def _sample_target_line_policy() -> Tuple[str, Tuple[int, int], int]:
         r = rng.random()
-        # 15%: short (<10 lines), 70%: medium (20-25), 15%: long (>30).
-        if r < 0.15:
+        # Bias toward non-trivial tasks:
+        # 5%: short (<10 lines), 70%: medium (20-25), 25%: long (>30).
+        if r < 0.05:
             return ("short", (7, 9), 420)
-        if r < 0.85:
+        if r < 0.75:
             return ("medium", (20, 25), 700)
-        return ("long", (31, 40), int(cfg.generation.red_max_new_tokens))
+        return ("long", (31, 45), int(cfg.generation.red_max_new_tokens))
 
     def _prompt_for_target(target_min: int, target_max: int) -> str:
         return red_task_generation_prompt(

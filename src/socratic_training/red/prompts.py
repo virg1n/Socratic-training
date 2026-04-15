@@ -31,10 +31,16 @@ def red_task_generation_prompt(*, curriculum_bucket: str, min_tests: int, code_l
           "code": <string, Python module code with a logical bug AND assert-based tests that run and fail>
         }}
 
-        Code length target for THIS task:
-        - Aim for about {code_lines_hint + 6} NON-EMPTY lines in the `code` field (including the assert tests).
-        - The bug must be a logical bug (e.g., off-by-one, wrong condition, wrong variable), not a syntax error.
-        - Prefer bugs that require tracing across multiple lines/steps (not a single-character typo).
+        Difficulty calibration (make it HARD within the bucket even for "easy"):
+        - The task should require multiple steps to debug (NOT a 1-line fix).
+        - Prefer 2–4 small helper functions (or a small class) so the bug is not isolated to one line.
+        - The bug must be a logical bug (off-by-one, wrong condition, wrong variable, incorrect accumulator, wrong loop bounds),
+          NOT a syntax error, NOT an import error, and NOT a trivial typo.
+        - Ensure the code actually runs to the tests and fails there (AssertionError is preferred).
+
+        Code size target (soft guidance; do your best):
+        - Aim for about {code_lines_hint} NON-EMPTY lines in the `code` field (including asserts).
+        - Avoid very short programs unless specifically unavoidable for the bucket.
 
         Requirements:
         - The `code` field must be valid Python source with real newlines after JSON parsing.
@@ -43,6 +49,6 @@ def red_task_generation_prompt(*, curriculum_bucket: str, min_tests: int, code_l
         - At least one assert MUST fail due to the bug when the module is executed with `python code.py`.
         - Do not catch the failing assertion; let it crash so the Python interpreter prints a traceback.
         - The statement must NOT include the final fixed code.
-        - Ensure the task is non-trivial (>= 2 reasoning steps).
+        - Ensure the task is non-trivial (>= 2 reasoning steps) and has multiple meaningful tests.
         """
     ).strip()
