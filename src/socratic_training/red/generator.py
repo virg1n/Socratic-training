@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 try:
@@ -48,6 +50,10 @@ def generate_red_tasks(
     num = int(num_tasks or cfg.generation.red_num_tasks)
     bucket = curriculum.bucket_prompt(topic=topic, difficulty=difficulty)
     rng = rng or random.Random()
+    debug_dir = Path(cfg.logging.out_dir) / "debug"
+    if debug:
+        debug_dir.mkdir(parents=True, exist_ok=True)
+    session_tag = str(time.time_ns())
 
     def _nonempty_line_count(code: str) -> int:
         return sum(1 for line in str(code).splitlines() if line.strip())
@@ -132,6 +138,14 @@ def generate_red_tasks(
                 gen_ids = seq
             text = tok.decode(gen_ids, skip_special_tokens=True)
             texts.append(text)
+            if debug:
+                # Keep a raw trace per attempt when debugging why tasks are not being accepted.
+                # This is separate from the final `red_last_completion.txt` snapshot written by the pipeline.
+                out_path = debug_dir / f"red_gen_raw_{session_tag}_call{call_index}_attempt{attempt}.txt"
+                try:
+                    out_path.write_text(text, encoding="utf-8")
+                except Exception:
+                    pass
 
             try:
                 obj = extract_first_json(text)
@@ -170,6 +184,11 @@ def generate_red_tasks(
                 task = RedTask.parse_obj(task_obj)
                 lines = _nonempty_line_count(task.code)
                 if lines < accept_min or lines > accept_max:
+                    if debug:
+                        print(
+                            f"[debug-red-gen] call={call_index} attempt={attempt} reject=code_lines "
+                            f"policy={policy} expected={accept_min}-{accept_max} got={lines}"
+                        )
                     errors.append(
                         f"call{call_index}: attempt{attempt}: code_lines_out_of_range "
                         f"policy={policy} expected={accept_min}-{accept_max} got={lines}"
@@ -182,6 +201,9 @@ def generate_red_tasks(
                     )
                 return task
             except Exception as e:
+                if debug:
+                    msg = str(e).replace("\n", " ")[:240]
+                    print(f"[debug-red-gen] call={call_index} attempt={attempt} reject=parse_error err={msg}")
                 errors.append(f"call{call_index}: attempt{attempt}: json_parse_error: {e}")
 
         errors.append(f"call{call_index}: json_parse_error: unknown")
